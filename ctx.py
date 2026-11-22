@@ -300,6 +300,47 @@ def rank(files: list[Source], words: list[str]) -> list[tuple[float, Source]]:
     return scored
 
 
+def declared_symbols(source: Source, limit: int = 6) -> list[str]:
+    """Names this file declares, lowercased, longest first.
+
+    Longest first because `refresh_token` is a better search key than `get`.
+    """
+    names: list[str] = []
+    for line in source.text.splitlines():
+        match = DEF_RE.match(line)
+        if not match:
+            continue
+        name = match.group(1).lower()
+        if len(name) > 3 and name not in names:
+            names.append(name)
+    names.sort(key=len, reverse=True)
+    return names[:limit]
+
+
+def call_sites(files: list[Source], symbols: list[str], skip: set[str], limit: int = 4):
+    """Where the declared names are used, outside the files already included.
+
+    The answer to "how does X work" is often half in the definition and half in
+    the caller that decides when it runs.
+    """
+    found: list[tuple[str, int, int]] = []
+    if not symbols:
+        return found
+    for source in files:
+        if source.path in skip:
+            continue
+        low = source.text.lower()
+        if not any(symbol in low for symbol in symbols):
+            continue
+        for hit in hit_lines(source, symbols)[:1]:
+            start = max(0, hit - 6)
+            end = min(len(source.text.splitlines()), hit + 7)
+            found.append((source.path, start, end))
+            if len(found) >= limit:
+                return found
+    return found
+
+
 def build_context(files: list[Source], words: list[str], budget: int, expand: bool = True):
     """Intelligence first, then cost. Returns (text, tokens_used, chunks)."""
     ranked = rank(files, words)
@@ -309,15 +350,18 @@ def build_context(files: list[Source], words: list[str], budget: int, expand: bo
     used = 0
     chunks: list[tuple[str, str]] = []
     seen: set[tuple[str, int, int]] = set()
+    seen_text: set[str] = set()
 
     def add(label: str, block: str) -> bool:
         nonlocal used
-        if not block.strip():
+        stripped = block.strip()
+        if not stripped or stripped in seen_text:
             return False
         cost = tokens(block)
         if used + cost > budget:
             return False
         chunks.append((label, block))
+        seen_text.add(stripped)
         used += cost
         return True
 
@@ -361,6 +405,37 @@ def build_context(files: list[Source], words: list[str], budget: int, expand: bo
                 block = "\n".join(outline(other))
                 if block:
                     add(f"{target} (related to {source.path})", block)
+
+    # Phase 5 — who calls what was found. The definition says how; the caller says
+    # when and why, and that is usually what the question is really asking.
+    if expand:
+        symbols: list[str] = []
+        for _score, source in ranked[:2]:
+            for name in declared_symbols(source):
+                if name not in symbols:
+                    symbols.append(name)
+        included = {source.path for _score, source in ranked[:3]}
+        for path, start, end in call_sites(files, symbols, included):
+            add(f"{path}:{start + 1}-{end} (call site)", numbered(
+                next(f for f in files if f.path == path).text, start, end))
+
+    # Phase 6 — only if the budget is still mostly unspent, go one hop further.
+    # Cheap-in, high-signal-out, and never at the expense of phases 1-5.
+    if expand and used < int(budget * 0.6):
+        by_path = {source.path: source for source in files}
+        index = stem_index(files)
+        for _score, source in ranked[:1]:
+            for first in related(source, index)[:3]:
+                middle = by_path.get(first)
+                if not middle:
+                    continue
+                for second in related(middle, index)[:2]:
+                    other = by_path.get(second)
+                    if not other or other.path == source.path:
+                        continue
+                    block = "\n".join(outline(other))
+                    if block:
+                        add(f"{second} (two hops from {source.path})", block)
 
     body = "\n\n".join(f"### {label}\n{block}" for label, block in chunks)
     return body, used, len(chunks)
@@ -424,6 +499,28 @@ def auto_queries(files: list[Source], count: int, seed: int = 0) -> list[dict]:
     return [{"question": ident, "needles": [ident]} for ident in rare[:count]]
 
 
+def load_rc(root: Path) -> dict[str, str]:
+    """`.ctxrc` in the scan root: key=value, one per line, # comments.
+
+    Only two keys are honoured. A project that wants a bigger default budget can
+    say so once instead of on every invocation.
+    """
+    path = root / ".ctxrc"
+    if not path.is_file():
+        return {}
+    out: dict[str, str] = {}
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            text = line.strip()
+            if not text or text.startswith("#") or "=" not in text:
+                continue
+            key, _, value = text.partition("=")
+            out[key.strip()] = value.strip()
+    except OSError:
+        return {}
+    return out
+
+
 def cmd_map(args) -> int:
     files = load(Path(args.path))
     if not files:
@@ -446,10 +543,15 @@ def cmd_query(args) -> int:
         for score, source in rank(files, words)[:5]:
             print(f"{score:8.2f}  {source.path}", file=sys.stderr)
     started = time.perf_counter()
+    rc = load_rc(Path(args.path))
+    budget = args.budget if args.budget is not None else int(rc.get("budget", "4000"))
+    expand = args.expand
+    if rc.get("expand", "").lower() in {"off", "false", "0", "no"}:
+        expand = False
     if args.lean:
-        body, used, chunks = build_context_lean(files, words, args.budget)
+        body, used, chunks = build_context_lean(files, words, budget)
     else:
-        body, used, chunks = build_context(files, words, args.budget, expand=args.expand)
+        body, used, chunks = build_context(files, words, budget, expand=expand)
     elapsed = (time.perf_counter() - started) * 1000
 
     if args.json:
@@ -549,6 +651,10 @@ def cmd_selftest(_args) -> int:
     assert best_hit_lines(sample, ["refresh", "token"])[0] == 1, "the two-word line ranks first"
     checks += 1
 
+    decls = declared_symbols(Source("g.py", "def refresh_token():\n    pass\ndef go():\n    pass\n"))
+    assert decls[0] == "refresh_token", "longest declared name first"
+    checks += 1
+
     words = words_of("where is the refresh token")
     assert "refresh" in words and "the" not in words, f"stopwords leaked: {words}"
     checks += 1
@@ -629,7 +735,6 @@ def main(argv: list[str] | None = None) -> int:
     p_query = sub.add_parser("query", help="build intelligence-first context")
     p_query.add_argument("path")
     p_query.add_argument("question")
-    p_query.add_argument("--budget", type=int, default=4000)
     p_query.add_argument("--lean", action="store_true", help="token-first baseline")
     p_query.add_argument("--no-expand", dest="expand", action="store_false")
     p_query.add_argument("--explain", action="store_true", help="print the ranking")
@@ -639,12 +744,17 @@ def main(argv: list[str] | None = None) -> int:
     p_ask = sub.add_parser("ask", help="query, with the path defaulting to .")
     p_ask.add_argument("question")
     p_ask.add_argument("path", nargs="?", default=".")
-    p_ask.add_argument("--budget", type=int, default=4000)
     p_ask.add_argument("--lean", action="store_true", help="token-first baseline")
     p_ask.add_argument("--no-expand", dest="expand", action="store_false")
     p_ask.add_argument("--explain", action="store_true", help="print the ranking")
     p_ask.add_argument("--json", action="store_true")
     p_ask.set_defaults(func=cmd_query)
+
+    # Both query forms share the budget flag; default None so .ctxrc can win.
+    for parser_ in (p_query, p_ask):
+        parser_.add_argument(
+            "--budget", type=int, default=None, help="default: .ctxrc, else 4000"
+        )
 
     p_bench = sub.add_parser("bench", help="recall, then tokens, then time")
     p_bench.add_argument("path")
