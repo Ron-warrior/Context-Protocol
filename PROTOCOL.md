@@ -26,6 +26,12 @@ and the anti-patterns.
 - Outlines are the cheapest useful unit: one line per declaration, ~10–15 tokens,
   and they tell you which file is worth a window.
 
+- **Outline only when you have no ranking.** Rungs 3 then 4 are the order for a
+  human who does not yet know what to read. Once a ranking exists, the body of the
+  top hit beats the outline of the tenth — which is why `ctx query` emits enclosing
+  bodies first and its map second. The two orders are not a contradiction: one
+  buys information, the other spends it.
+
 ## Write side
 
 Retrieval is the cheap half. The v1.0.0 trace spent 824 lines authoring against 202
