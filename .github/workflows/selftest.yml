@@ -22,3 +22,30 @@ jobs:
           python3 eval/retrieval_bench.py . --auto 10 --sweep 1000,4000
           python3 eval/retrieval_bench.py . --auto 10 --stop
           python3 eval/retrieval_bench.py . --auto 10 --focus eval/retrieval_bench.py
+
+
+  real-corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check out an external repository as the corpus
+        uses: actions/checkout@v4
+        with:
+          repository: tashfeenahmed/freellmapi
+          fetch-depth: 1
+          sparse-checkout: |
+            server/src
+            shared
+            cli
+          path: corpus
+      - name: Size the corpus
+        run: |
+          echo "source files: $(find corpus -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.md' \) | wc -l)"
+      - name: Sweep on a real repository
+        run: python3 eval/retrieval_bench.py corpus --auto 25 --sweep 1000,4000,16000
+      - name: Stop rules on a real repository
+        run: python3 eval/retrieval_bench.py corpus --auto 25 --stop
