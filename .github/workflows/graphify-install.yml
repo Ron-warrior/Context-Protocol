@@ -1,0 +1,79 @@
+name: install graphify
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Environment checks
+        run: |
+          echo "## runner"
+          uname -a
+          echo "pwd: $PWD"
+          echo "python3: $(python3 --version 2>&1)"
+          echo "git: $(git --version)"
+          echo "node: $(node --version 2>&1 || echo absent)"
+          echo "npm: $(npm --version 2>&1 || echo absent)"
+          echo "VIRTUAL_ENV=${VIRTUAL_ENV:-<none>}"
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.x"
+
+      - name: Install graphify 0.9.115 into an isolated venv
+        run: |
+          set -euxo pipefail
+          uv venv --python 3.12 .venv-graphify
+          source .venv-graphify/bin/activate
+          uv pip install "graphifyy==0.9.115"
+
+          echo "## installed"
+          python -c "import graphify, sys; print('import ok:', graphify.__file__); print('python:', sys.version.split()[0])"
+          graphify --version
+          pip freeze | grep -Ei '^graphifyy|^tree-sitter' || true
+
+      - name: CLI surface
+        run: |
+          set -euxo pipefail
+          source .venv-graphify/bin/activate
+          which graphify
+          graphify --help > /tmp/graphify-help.txt
+          head -n 25 /tmp/graphify-help.txt
+
+      - name: Smoke test with a real extraction
+        run: |
+          set -euo pipefail
+          source .venv-graphify/bin/activate
+          mkdir -p /tmp/gfixture
+          printf 'def double(value):\n    return value * 2\n\n\ndef main():\n    return double(21)\n' > /tmp/gfixture/demo.py
+          cd /tmp/gfixture
+          GRAPHIFY_BACKEND=none graphify extract . --code-only
+          echo "## outputs"
+          find graphify-out -maxdepth 1 -type f | sort
+
+      - name: Assert the graph has nodes
+        run: |
+          set -euo pipefail
+          source .venv-graphify/bin/activate
+          cd /tmp/gfixture
+          python - <<'PY'
+          import json, pathlib, sys
+
+          path = pathlib.Path("graphify-out/graph.json")
+          if not path.exists():
+              sys.exit("FAIL: graph.json was not written")
+
+          data = json.loads(path.read_text())
+          nodes = data.get("nodes") or []
+          edges = data.get("links") or data.get("edges") or []
+          print(f"nodes={len(nodes)} edges={len(edges)}")
+          if not nodes:
+              sys.exit("FAIL: zero nodes extracted")
+          print("PASS: graph built and parsed")
+          PY
