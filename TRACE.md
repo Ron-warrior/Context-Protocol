@@ -382,3 +382,72 @@ lose.
 | authored | ~90 lines (bench, workflow, scoreboard, trace) |
 | read-back | the sweep block, the dispatch, both workflow jobs |
 | executed | CI queued for 1.11.0 + 1.12.0 + 1.13.0 (one run covers all three) |
+
+
+## Trace: the answer given from one document
+
+Asked whether FreeLLMAPI could be used, I answered "no" — from its README alone.
+The challenge forced a docs read, which showed the router ships an MCP server on
+`/mcp` (Streamable HTTP + Bearer), off by default.
+
+**The failure:** I answered a capability question from the repository's front page
+instead of its integration doc, then generalised "can't run a server here" into
+"can't be used". Rung 1 says map before reading; rung 6(c) says check the
+interface. I did neither.
+
+**The cost:** one wrong answer, one correction, one round of docs reading.
+
+**The rule:** never answer "can I use X" from a README. Read the integration, MCP
+or docs page first, because those describe the interface rather than the intent.
+
+The correction, with the exact attach steps, is in INTEGRATIONS.md.
+
+## Real corpus, second run (795 files)
+
+The job that finally has enough files to mean something, plus the two modes that
+disagree with my expectations.
+
+| budget | ladder | pagerank_map | grep_files | read_all |
+| --- | --- | --- | --- | --- |
+| 1000 | **0.567** | 0.121 | 0.000 | 0.000 |
+| 4000 | **0.213** | 0.070 | 0.108 | 0.000 |
+| 16000 | **0.058** | 0.023 | 0.040 | 0.003 |
+
+Stop rules, ranking held fixed:
+
+| rule | answer rate | tokens | tokens/answer |
+| --- | --- | --- | --- |
+| until_found | 0.680 | 2,404 | 3,536 |
+| three_strike | 0.640 | 2,124 | 3,318 |
+| two_strike | 0.600 | 1,936 | 3,227 |
+| **one_strike** | 0.600 | **1,770** | **2,950** |
+
+Ablation, each rung-2 claim disabled at 4k:
+
+| variant | recall/1k |
+| --- | --- |
+| default | 0.213 |
+| definition_weight_off | 0.201 |
+| length_damping_off | 0.188 |
+| pagerank_off | 0.213 |
+
+Outline share of the budget: 0.2 → 0.207, **0.4 → 0.213**, 0.6 → 0.172.
+
+**What this settles:**
+
+1. **The ladder wins at every budget on a real repo** — not an artifact of a
+   seven-file fixture.
+2. **One strike is the best stop rule by answer rate per token** (0.600 at 1,770)
+   while giving up 8 points of answer rate against until_found. The "quit form" of
+   the hypothesis was not falsified; the *coarse* form was.
+3. **Pagerank adds nothing here.** `pagerank_off` ties the default exactly at
+   0.213 — so the aider claim, in this harness, does not earn its keep. Length
+   damping and definition weighting do (0.188 and 0.201 without them).
+4. **The 40% outline default is earning its keep**, unlike most constants in this
+   project: 0.6 costs 19% of the score.
+
+**And a reporting defect the run exposed:** `max()` over a dict of tied scores
+picks one arbitrarily, so an exact 0.213 == 0.213 tie printed "an ablation beats
+default — a rung-2 claim is losing". Fixed in 1.14.0 to treat ties as ties. The
+error was in the pessimistic direction, which is still an error: a false alarm
+that makes the protocol look more self-critical than it is.

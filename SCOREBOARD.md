@@ -159,20 +159,32 @@ Queued, not yet tested. Cheap to test, so test them rather than arguing:
   rather than asking the reader to spot it. Adopted in rung 6 on arithmetic, not on
   measurement: testable by replaying a trace both ways and counting defects found
   per 1k tokens. If it loses, it goes.
-- **The stop rule may matter more than the ranking.** First valid numbers (real
-  corpus, chunk-level, 1.10.0): until_found 68% answers at 2,404 tokens — best
-  answers per 1k (0.283); two_strike 16% at 817. **Falsified in its quit-form:**
-  strikes do not hold answer rate; quitting early is expensive in answers, not
-  cheap. Note this does not indict README's two-strike rule, which says *change
-  rung* after two misses, not *quit* — the data supports that reading. 1.11.0
-  re-counts strikes over windows only (outlines are the map and burn none); its
-  CI run decides whether any strike rule beats until_found per token.
+- **The stop rule may matter more than the ranking.** Second real-corpus run
+  (795 files, chunk-level, 1.11.0): until_found 0.680 at 2,404 tokens;
+  three_strike 0.640 at 2,124; two_strike 0.600 at 1,936; **one_strike 0.600 at
+  1,770** — best answer rate per 1k of the four. One strike gives up 0.08 recall
+  for 26% fewer tokens. The quit-form is therefore not falsified at window
+  granularity; it is a real trade, and a defensible one.
 - **Persisted notes beat a rebuilt index** for repos under ~50k LOC, because
   re-derivation is cheap there and index staleness is not. Unchanged.
 - **Cross-file rename is where text-level tools lose hardest** — the one case where
   an LSP-backed tool (Serena) would pay for its install cost outright. Unchanged.
 
 
+
+## Real corpus (freellmapi, 795 files)
+
+First numbers from a repository that is not this one. `--sweep`, `--stop`,
+`--ablate` and `--outline-sweep` all run against it in CI.
+
+- **Ladder wins every budget**: 0.567 / 0.213 / 0.058 recall per 1k at 1k / 4k / 16k.
+- **PageRank earns nothing here**: `pagerank_off` ties the default exactly at
+  0.213. Length damping and definition weighting both earn their keep (0.188 and
+  0.201 without them). The aider claim does not survive in this harness.
+- **The 40% outline share is load-bearing**: 0.6 costs 19% of the score, which is
+  rare for a constant in this project.
+
+Full tables and the reading of each: TRACE.md.
 
 **Versioning note.** The protocol (README.md) is at 1.3.0 — rung 6(c) ("if the
 project runs, run it") was added after the `NameError` CI run caught a defect

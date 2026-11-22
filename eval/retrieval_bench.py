@@ -821,16 +821,31 @@ def report_ablate(
         cells = " | ".join(f"{table[budget][name]['recall_per_1k']:.3f}" for budget in budgets)
         print(f"| {name} | {cells} |")
     print()
-    winners = {
-        max(table[budget].items(), key=lambda item: item[1]["recall_per_1k"])[0]
+    best = {
+        budget: max(item["recall_per_1k"] for item in table[budget].values())
         for budget in budgets
     }
-    if winners == {"default"}:
-        print("default knobs win at every budget -- the claims are earning their keep")
-    elif "default" in winners:
-        print("default ties with an ablation at some budget -- the margin is thin")
+    # Ties are ties. max() alone picks one arbitrarily by dict order, which once
+    # reported "an ablation beats default" for an exact 0.213 == 0.213.
+    losing_budgets = 0
+    losers: set[str] = set()
+    for budget in budgets:
+        leaders = {
+            name
+            for name, item in table[budget].items()
+            if abs(item["recall_per_1k"] - best[budget]) <= 1e-9
+        }
+        if "default" in leaders:
+            continue
+        losing_budgets += 1
+        losers |= leaders
+    if not losers:
+        print("default knobs lead or tie at every budget -- no ablation beats them")
     else:
-        print(f"an ablation beats default: {', '.join(sorted(winners))} -- a rung-2 claim is losing")
+        print(
+            f"an ablation beats default at {losing_budgets} of {len(budgets)} budgets: "
+            f"{', '.join(sorted(losers))} -- a rung-2 claim is losing"
+        )
     return 0
 
 
