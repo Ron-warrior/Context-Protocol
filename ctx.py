@@ -775,7 +775,8 @@ def cmd_selftest(_args) -> int:
         checks += 2
 
         index = stem_index(files)
-        assert "alpha.py" in related(alpha, index), "import must resolve by stem"
+        beta = next(f for f in files if f.path == "beta.py")
+        assert "alpha.py" in related(beta, index), "beta imports alpha, resolved by stem"
         checks += 1
 
         queries = auto_queries(files, 5)
