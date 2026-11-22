@@ -100,8 +100,21 @@ jobs:
           python3 ctx.py ask "how does the ladder rank files" --budget 2000
       - name: Bench this repository (intelligence vs lean)
         run: |
-          set -euo pipefail
-          python3 ctx.py bench . --queries 100
+          set -uo pipefail
+          # A green run reports nothing back to whoever is deciding; a red one
+          # prints every number. So the floor is the reporting channel, not just a
+          # guard: measured basis is 0.790 recall at 100 queries, budget 4000 on
+          # this corpus, and 0.75 is the line below which a version has regressed.
+          python3 ctx.py bench . --queries 100 --floor 0.75 > bench-self.txt 2>&1
+          status=$?
+          cat bench-self.txt
+          {
+            echo '### bench: this repository, floor 0.75'
+            echo '```'
+            cat bench-self.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
       - name: Check out a second corpus (Python, not TypeScript)
         uses: actions/checkout@v4
         with:
@@ -113,8 +126,17 @@ jobs:
           path: corpus2
       - name: Bench the second corpus
         run: |
-          set -euo pipefail
-          python3 ctx.py bench corpus2 --queries 100
+          set -uo pipefail
+          python3 ctx.py bench corpus2 --queries 100 > bench-corpus2.txt 2>&1
+          status=$?
+          cat bench-corpus2.txt
+          {
+            echo '### bench: graphify corpus'
+            echo '```'
+            cat bench-corpus2.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
       - name: Install as a console script
         run: |
           set -euxo pipefail
@@ -136,10 +158,27 @@ jobs:
           path: corpus
       - name: Query and bench the real corpus with ctx
         run: |
-          set -euo pipefail
+          set -uo pipefail
           python3 ctx.py query corpus "how are provider keys stored" --budget 2000
-          python3 ctx.py bench corpus --queries 100
+          python3 ctx.py bench corpus --queries 100 > bench-corpus.txt 2>&1
+          normal=$?
+          cat bench-corpus.txt
           echo "--- hard mode: needles that exist in exactly one file ---"
-          python3 ctx.py bench corpus --queries 100 --rare 1
+          python3 ctx.py bench corpus --queries 100 --rare 1 > bench-corpus-hard.txt 2>&1
+          hard=$?
+          cat bench-corpus-hard.txt
           echo "--- where the misses come from ---"
-          python3 ctx.py bench corpus --queries 100 --rare 1 --diagnose
+          python3 ctx.py bench corpus --queries 100 --rare 1 --diagnose >> bench-corpus-hard.txt 2>&1
+          diag=$?
+          tail -n 30 bench-corpus-hard.txt
+          {
+            echo '### bench: freellmapi, normal'
+            echo '```'
+            cat bench-corpus.txt
+            echo '```'
+            echo '### bench: freellmapi, hard, and where the misses come from'
+            echo '```'
+            cat bench-corpus-hard.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $((normal || hard || diag))

@@ -8,7 +8,7 @@ This is the root README on purpose. It is the only file loaded into every chat o
 this project, so it is the only place a rule can live and actually take effect.
 Everything else is loaded on demand — which is also rung 1.
 
-Version: 2.17.0 — the objective is ordered: intelligence, then tokens, then speed
+Version: 2.18.0 — the objective is ordered: intelligence, then tokens, then speed
 
 ---
 
@@ -34,6 +34,7 @@ ctx query . "auth refresh" --explain # show why each file ranked
 ctx path User Store                  # files mentioning both, with line numbers
 ctx map .                            # file map with line sizes
 ctx bench . --queries 25             # recall, then tokens, then ms
+ctx bench . --queries 100 --floor .75 # exit 1 if recall drops below the floor
 ctx plan                             # the ladder as a checklist
 ctx selftest                         # fixtures; exit 0 means it works
 ```

@@ -595,3 +595,48 @@ ninety minutes of iteration produced no number for that reason alone.
 this corpus. The 28% misses are not characterised — never-ranked file, or budget
 exhausted — and until they are, more phases are guessing. That is the next
 measurement, not the next feature.
+
+
+
+## Trace: 2.18.0 — the measurement that had no reader
+
+A benchmark that runs and nobody reads is the same defect as a test that passes
+and proves nothing. This trace is about the reporting channel, not retrieval.
+
+**The failure.** `ctx bench` has printed a full table — recall, tokens, over
+budget, ms, per policy — since 2.15.0, and CI has run it five times per push on
+three corpora. None of those numbers ever reached the agent doing the iteration.
+`github_checks` shows the console log of a *failed* job only; a green job's output
+is visible to whoever opens the run page on GitHub, which is not the loop that
+decides the next version. So every green bench was, functionally, a bench that
+did not happen.
+
+**How it surfaced.** Reading a green run's check list and noticing the only thing
+that could be learned from it was "passed". The numbers from 2.16.0 (phrase boost)
+and 2.17.0 (small files whole, two blocks per top-10 file) were still unknown
+after both versions had been written and pushed — two changes measured by a
+harness whose output nobody could read.
+
+**The fix.** `ctx bench --floor <recall>` exits 1 when intelligence recall falls
+below the floor, printing the whole table and the missed floor on stderr. A green
+run now means "at least the floor"; a red one is the report. CI sets the floor at
+0.75 on this repository, against a measured 0.790 normal at 100 queries and budget
+4000, and writes every bench table into `$GITHUB_STEP_SUMMARY` so the numbers are
+at least on the run page. `set -uo pipefail` (no `-e`) is deliberate: the summary
+must be written before the step exits with the bench's status.
+
+**The same defect, one level up.** While fixing it, two more stamps were found to
+be out of date in the same way — written once, never re-read:
+
+| Drift | How long | How it surfaced |
+| --- | --- | --- |
+| `pyproject.toml` said `version = "2.0.0"` | 17 releases | Reading the manifest while adding a floor flag |
+| `SKILL.md` said bodies stop at rank 10 | 4 releases (2.14.0 made emission spend to 85%) | Reading the paste-the-URL entry point |
+
+The version-drift check in CI compared only `ctx.py` and `README.md`, so a file
+that ships to PyPI could disagree with both and pass. It now compares every file
+that carries the number, exactly.
+
+**What is not claimed.** The recall effect of 2.16.0 and 2.17.0 is still unmeasured
+as of this entry. The floor is what makes the next reading possible; it is not a
+result. The 2.17.0 run was still executing when this was written.

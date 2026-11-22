@@ -260,3 +260,29 @@ its phase. Distinguishing those two is the next measurement.
 cheaper policy and is probably noise on a shared runner. Noted, not acted on.
 
 
+
+
+
+## 2.18.0 — the bench becomes a regression test
+
+Every number above was produced by a harness whose output nothing in the loop
+could read. Green jobs print to a run page; the iteration happens in a chat. So
+the measurement existed and the feedback did not.
+
+`ctx bench --floor <recall>` closes that: recall below the floor exits 1 and
+prints the table and the shortfall on stderr, which *is* readable. CI runs the
+self-bench at 0.75 against a measured 0.790, and every bench table now also lands
+in the job summary.
+
+Consequence for this file: a green CI run is now evidence of a floor, not of a
+number, and a red one is how a number arrives. Recall is no longer allowed to
+move down silently between versions.
+
+Two documentation stamps were found stale while wiring it — `pyproject.toml` at
+2.0.0 for 17 releases, `SKILL.md` describing the pre-2.14.0 emission order. Both
+are fixed, and the drift check now compares all three files that carry the
+version.
+
+**Unmeasured as of this entry:** the recall effect of 2.16.0 and 2.17.0. The floor
+was added precisely because those two versions were shipped without a readable
+result.

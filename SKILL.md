@@ -61,6 +61,7 @@ ctx query . "auth refresh" --budget 1500 --lean   # token-first baseline
 ctx path User Store                  # files mentioning both, with line numbers
 ctx map .                            # file map with line counts
 ctx bench . --queries 25             # recall, then tokens, then ms
+ctx bench . --queries 100 --floor .75 # exit 1 rather than pass silently
 ctx plan                             # the ladder as a checklist, no install needed
 ctx selftest                         # fixtures; exit 0 means it works
 ```

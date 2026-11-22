@@ -48,7 +48,7 @@ TEXT_EXT = {
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "2.17.0"
+__version__ = "2.18.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -897,6 +897,23 @@ def cmd_bench(args) -> int:
                 for recall, tokens_, over, ms, name in rows
             },
         }, indent=2))
+
+    # A measurement nobody reads is a claim. CI shows a green job's console output
+    # to nobody who is deciding, and the failure log is the only channel that
+    # reaches back. So a floor turns the bench into a regression test: above it,
+    # nothing happened; below it, the numbers are forced back into view.
+    floor = getattr(args, "floor", None)
+    if floor is not None:
+        recall_by_name = {name: recall for recall, _t, _o, _m, name in rows}
+        got = recall_by_name.get("intelligence", 0.0)
+        if got < floor:
+            print(
+                f"\nFLOOR MISSED: intelligence recall {got:.3f} < {floor:.3f} "
+                f"on {args.path} ({len(queries)} queries, budget {args.budget})",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"\nfloor held: intelligence recall {got:.3f} >= {floor:.3f}")
     return 0
 
 
@@ -1068,6 +1085,12 @@ def main(argv: list[str] | None = None) -> int:
         help="classify the misses: never ranked vs ranked but not emitted",
     )
     p_bench.add_argument("--json", action="store_true", help="machine-readable results")
+    p_bench.add_argument(
+        "--floor", type=float, default=None,
+        help="exit 1 when intelligence recall falls below this; makes the bench a "
+             "regression test CI can enforce, and a failure the only report that "
+             "reaches the agent",
+    )
     p_bench.set_defaults(func=cmd_bench)
 
     p_self = sub.add_parser("selftest", help="run fixtures")
