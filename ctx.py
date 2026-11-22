@@ -276,7 +276,11 @@ def enclosing_block(text: str, hit: int) -> tuple[int, int]:
         start = max(0, hit - 6)
     end = min(len(lines), max(hit + 8, start + 8))
     if end - start > MAX_BODY_LINES:
-        end = start + MAX_BODY_LINES
+        # Never cut the matched line out of its own block. Capping from the
+        # declaration alone drops the hit whenever it sits deep in a long
+        # function, which is exactly when the block was worth including.
+        start = max(start, hit - MAX_BODY_LINES // 2)
+        end = min(end, start + MAX_BODY_LINES)
     return start, end
 
 
@@ -792,6 +796,17 @@ def cmd_selftest(_args) -> int:
         start, end = enclosing_block(alpha.text, 0)
         assert start == 0, "block must start at the declaration"
         checks += 1
+
+        # A hit deep inside a long function must still be inside the block.
+        long_body = Source(
+            "long.py",
+            "def big():\n" + "\n".join(f"    x{i} = {i}" for i in range(200)) + "\n    needle_here()\n",
+        )
+        deep = long_body.lines.index("    needle_here()")
+        lo, hi = enclosing_block(long_body.text, deep)
+        assert lo <= deep < hi, f"hit at {deep} fell outside block {lo}-{hi}"
+        assert hi - lo <= MAX_BODY_LINES, "block must respect the cap"
+        checks += 2
 
         body, used, chunks = build_context(files, ["refresh", "token"], 4000)
         assert "refresh_token" in body, "the context must surface the needle"
