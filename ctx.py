@@ -643,14 +643,14 @@ def cmd_bench(args) -> int:
 
     def read_all(_words):
         body = "\n\n".join(f"### {s.path}\n{s.text}" for s in files)
-        return body, min(tokens(body), args.budget)
+        return body, tokens(body)
 
     def grep(words):
         body = "\n\n".join(
             f"### {s.path}\n{s.text}" for s in files
             if any(w in s.text.lower() for w in words)
         )
-        return body, min(tokens(body), args.budget)
+        return body, tokens(body)
 
     def lean(words):
         return build_context_lean(files, words, args.budget)[:2]
@@ -666,39 +666,48 @@ def cmd_bench(args) -> int:
     }
 
     print(f"corpus: {args.path}  files: {len(files)}  queries: {len(queries)}  budget: {args.budget}")
-    print("objective: recall first, tokens second, speed third\n")
-    print("| policy | recall | tokens | ms |")
-    print("| --- | --- | --- | --- |")
+    print("objective: recall first, tokens second, speed third")
+    print("tokens is what the policy ACTUALLY emitted; over = it blew the budget\n")
+    print("| policy | recall | tokens | over | ms |")
+    print("| --- | --- | --- | --- | --- |")
 
     rows = []
     for name, build in policies.items():
         total_recall = 0.0
         total_tokens = 0
+        over = 0
         started = time.perf_counter()
         for query in queries:
             context, used = build(words_of(query["needles"][0]))
             total_tokens += used
+            if used > args.budget:
+                over += 1
             total_recall += recall_of(context, query["needles"])
         elapsed = (time.perf_counter() - started) * 1000
         count = len(queries)
-        rows.append((total_recall / count, total_tokens / count, elapsed / count, name))
+        rows.append((total_recall / count, total_tokens / count, over, elapsed / count, name))
 
-    rows.sort(key=lambda row: (-row[0], row[1], row[2]))
-    for mean_recall, mean_tokens, mean_ms, name in rows:
-        print(f"| {name} | {mean_recall:.3f} | {mean_tokens:.0f} | {mean_ms:.1f} |")
-    print(f"\nbest by recall, then tokens, then ms: {rows[0][3]}")
+    # Only policies that respect the budget can win: a dump that blows it is not
+    # comparable, and scoring it as if it fit is how a compression benchmark lies.
+    within = [row for row in rows if row[2] == 0] or rows
+    within.sort(key=lambda row: (-row[0], row[1], row[3]))
+    rows.sort(key=lambda row: (-row[0], row[1], row[3]))
 
-    # The comparison that matters for the objective: what did intelligence-first
-    # buy on recall, and what did it cost in tokens?
-    by_name = {name: (recall, tokens_) for recall, tokens_, _ms, name in rows}
+    for mean_recall, mean_tokens, over, mean_ms, name in rows:
+        flag = f"{over}/{len(queries)}" if over else "-"
+        print(f"| {name} | {mean_recall:.3f} | {mean_tokens:.0f} | {flag} | {mean_ms:.1f} |")
+
+    print(f"\nbest within budget (recall, then tokens, then ms): {within[0][4]}")
+
+    by_name = {row[4]: row for row in rows}
     if "intelligence" in by_name and "lean" in by_name:
-        ai_recall, ai_tokens = by_name["intelligence"]
-        lean_recall, lean_tokens = by_name["lean"]
+        ai = by_name["intelligence"]
+        ln = by_name["lean"]
         print(
-            f"\nintelligence vs lean: recall {ai_recall - lean_recall:+.3f}, "
-            f"tokens {ai_tokens - lean_tokens:+.0f}"
+            f"intelligence vs lean: recall {ai[0] - ln[0]:+.3f}, "
+            f"tokens {ai[1] - ln[1]:+.0f}"
         )
-        if ai_recall <= lean_recall and ai_tokens >= lean_tokens:
+        if ai[0] <= ln[0] and ai[1] >= ln[1]:
             print("lean wins on both -- intelligence-first is paying for nothing here")
     return 0
 

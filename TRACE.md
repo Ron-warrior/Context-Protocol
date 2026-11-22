@@ -528,3 +528,36 @@ README: both let a proxy stand between the question and its evidence.
 **Time note.** No clock is available in this environment, so elapsed time cannot be
 measured or waited on; work proceeds in rounds. The date recorded by git at this
 point is 2026-11-22.
+
+
+## Trace: the first real numbers, and the flaw they exposed
+
+`ctx bench` on the 795-file corpus, 10 queries, budget 4000:
+
+| policy | recall | tokens | ms |
+| --- | --- | --- | --- |
+| read_all | 1.000 | 4000 | 41.3 |
+| grep | 1.000 | 4000 | 56.9 |
+| intelligence | 0.800 | 3493 | 143.9 |
+| lean | 0.700 | 2990 | 127.3 |
+
+**Intelligence-first beat lean by +0.100 recall for +503 tokens.** The change was
+worth making; the hypothesis held on this corpus.
+
+**But the table was lying.** `read_all` and `grep` "used" exactly 4000 tokens
+because the code reported `min(tokens(emitted), budget)` — they emit the whole
+corpus and the column quietly capped the cost. A dump that blows the budget was
+scoring 1.000 recall at zero apparent penalty, which is precisely the accounting
+trick I called out in graphify's benchmark two days of work ago.
+
+Worse: the "best by recall" line then reported `read_all` as the winner, so the
+benchmark's own headline contradicted the protocol it exists to test.
+
+Fixed: the tokens column is now what the policy actually emitted, an `over` column
+counts queries that blew the budget, and only policies within budget can win. The
+old behaviour is left in this trace rather than deleted, because a benchmark that
+hides its own mis-scoring is how the last one got published.
+
+**What this cost.** About ninety minutes of iterations with no number, because the
+measurement sat behind an install step that failed three times. Three of the twenty
+"iterations" were fixing the tool that measures, not the tool itself.
