@@ -48,6 +48,7 @@ TEXT_EXT = {
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
+__version__ = "2.6.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -80,6 +81,16 @@ class Source:
     path: str
     text: str
     symbols: set[str] = field(default_factory=set)
+    lines: list[str] = field(default_factory=list)
+    low: str = ""
+
+    def __post_init__(self) -> None:
+        # Split and lowercase once per file rather than once per query: ranking
+        # touches every file, and speed is the third objective but it is free here.
+        if not self.lines:
+            self.lines = self.text.splitlines()
+        if not self.low:
+            self.low = self.text.lower()
 
 
 def tokens(text: str) -> int:
@@ -213,7 +224,7 @@ def related(source: Source, index: dict[str, str]) -> list[str]:
 
 def outline(source: Source) -> list[str]:
     lines: list[str] = []
-    for number, line in enumerate(source.text.splitlines(), start=1):
+    for number, line in enumerate(source.lines, start=1):
         if DEF_RE.match(line):
             lines.append(f"{number}: {line.strip()[:120]}")
             if len(lines) >= MAX_OUTLINE_LINES:
@@ -223,7 +234,7 @@ def outline(source: Source) -> list[str]:
 
 def hit_lines(source: Source, words: list[str]) -> list[int]:
     hits: list[int] = []
-    for index, line in enumerate(source.text.splitlines()):
+    for index, line in enumerate(source.lines):
         low = line.lower()
         if any(word in low for word in words):
             hits.append(index)
@@ -238,7 +249,7 @@ def best_hit_lines(source: Source, words: list[str], limit: int = 2) -> list[int
     ties fall back to the earlier line.
     """
     scored: list[tuple[int, int, int]] = []
-    for index, line in enumerate(source.text.splitlines()):
+    for index, line in enumerate(source.lines):
         low = line.lower()
         distinct = sum(1 for word in words if word in low)
         if not distinct:
@@ -287,12 +298,11 @@ def rank(files: list[Source], words: list[str]) -> list[tuple[float, Source]]:
         return []
     scored: list[tuple[float, Source]] = []
     for source in files:
-        low = source.text.lower()
-        if not any(word in low for word in words):
+        if not any(word in source.low for word in words):
             continue
         hits = 0
         co_occur = 0
-        for line in source.text.splitlines():
+        for line in source.lines:
             low_line = line.lower()
             present = sum(1 for word in words if word in low_line)
             if present:
@@ -561,6 +571,13 @@ def cmd_query(args) -> int:
         body, used, chunks = build_context(files, words, budget, expand=expand)
     elapsed = (time.perf_counter() - started) * 1000
 
+    if not body.strip():
+        print(
+            f"no match for {args.question!r} in {len(files)} files",
+            file=sys.stderr,
+        )
+        return 0
+
     if args.json:
         print(json.dumps({
             "question": args.question,
@@ -815,6 +832,7 @@ def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
     parser = argparse.ArgumentParser(prog="ctx", description="Context Protocol CLI")
+    parser.add_argument("--version", action="version", version=f"ctx {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_map = sub.add_parser("map", help="file map with line counts")

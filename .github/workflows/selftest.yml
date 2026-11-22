@@ -67,6 +67,8 @@ jobs:
           python-version: "3.11"
       - name: Compile
         run: python3 -m py_compile ctx.py
+      - name: Version
+        run: python3 ctx.py --version
       - name: Self-test
         run: python3 ctx.py selftest
       # Measurement comes before installation on purpose. Twice now the install
