@@ -36,6 +36,7 @@ Usage
     python3 eval/retrieval_bench.py . --focus src/app.py
     python3 eval/retrieval_bench.py . --stop
     python3 eval/retrieval_bench.py . --ablate
+    python3 eval/retrieval_bench.py . --outline-sweep 0.2,0.4,0.6
     python3 eval/retrieval_bench.py --selftest
 
 Queries file:
@@ -425,10 +426,11 @@ def chunks_ladder(
     ranked: dict[str, float],
     keywords: list[str],
     budget: int,
+    outline_share: float = 0.4,
 ) -> list[tuple[str, str]]:
-    """Rank -> outline within 40% of the budget -> scoped windows with the rest."""
+    """Rank -> outline within `outline_share` of the budget -> scoped windows."""
     ordered = sorted(corpus.files, key=lambda source: -ranked.get(source.path, 0.0))
-    heading_budget = max(1, int(budget * 0.4))
+    heading_budget = max(1, int(budget * outline_share))
     used = 0
     chunks: list[tuple[str, str]] = []
 
@@ -707,6 +709,24 @@ def parse_budgets(spec: str) -> list[int]:
     return budgets
 
 
+def parse_shares(spec: str) -> list[float]:
+    """Outline shares, each between 0 (no map phase) and 1 (map only)."""
+    shares = []
+    for part in spec.replace(" ", "").split(","):
+        if not part:
+            continue
+        try:
+            value = float(part)
+        except ValueError as error:
+            raise ValueError(f"not an outline share: {part}") from error
+        if not 0.0 <= value <= 1.0:
+            raise ValueError(f"outline share must be between 0 and 1: {part}")
+        shares.append(value)
+    if not shares:
+        raise ValueError("--outline-sweep needs at least one share")
+    return shares
+
+
 def report_sweep(
     corpus: Corpus,
     prepared: list[tuple[dict, list[str], dict[str, float]]],
@@ -814,6 +834,78 @@ def report_ablate(
     return 0
 
 
+def report_outline_sweep(
+    corpus: Corpus,
+    prepared: list[tuple[dict, list[str], dict[str, float]]],
+    budgets: list[int],
+    shares: list[float],
+    as_json: bool,
+) -> int:
+    """Rung 3's outline share as a swept knob, not a constant.
+
+    The 40% default was set by judgement and never tested; on a real corpus the
+    map phase can spend 1,600 of a 4,000-token budget. If recall per 1k is flat
+    across shares the constant is not load-bearing; if another share wins, rung
+    3 gets retuned. The ranking is held fixed -- this varies only the split.
+    """
+    table: dict[float, dict[int, dict]] = {}
+    for share in shares:
+        by_budget: dict[int, dict] = {}
+        for budget in budgets:
+            total_recall = 0.0
+            total_tokens = 0
+            for query, keywords, ranked in prepared:
+                context, used = assemble(
+                    chunks_ladder(
+                        corpus, ranked, keywords, budget, outline_share=share
+                    ),
+                    budget,
+                )
+                total_recall += recall_of(context, query.get("needles", []))
+                total_tokens += used
+            count = len(prepared) or 1
+            mean_recall = total_recall / count
+            mean_tokens = total_tokens / count
+            by_budget[budget] = {
+                "recall": mean_recall,
+                "tokens": mean_tokens,
+                "recall_per_1k": (mean_recall / (mean_tokens / 1000.0)) if mean_tokens else 0.0,
+            }
+        table[share] = by_budget
+
+    if as_json:
+        print(
+            json.dumps(
+                {str(share): {str(b): r for b, r in by.items()} for share, by in table.items()},
+                indent=2,
+            )
+        )
+        return 0
+
+    print(f"corpus: {len(corpus.files)} files  queries: {len(prepared)}\n")
+    print("ladder recall per 1k tokens, by outline share\n")
+    print("| outline share | " + " | ".join(str(b) for b in budgets) + " |")
+    print("| --- |" + " --- |" * len(budgets))
+    for share in shares:
+        cells = " | ".join(f"{table[share][b]['recall_per_1k']:.3f}" for b in budgets)
+        print(f"| {share:g} | {cells} |")
+    print()
+    for budget in budgets:
+        best = max(table.items(), key=lambda item: item[1][budget]["recall_per_1k"])
+        print(f"  budget {budget:>6}: best outline share = {best[0]:g}")
+    winners = {
+        max(table.items(), key=lambda item: item[1][b]["recall_per_1k"])[0]
+        for b in budgets
+    }
+    if 0.4 in winners and len(winners) == 1:
+        print("\nthe 40% default wins -- the constant was earning its keep")
+    elif 0.4 in winners:
+        print("\nthe 40% default ties at some budget -- the margin is thin")
+    else:
+        print(f"\nthe 40% default loses: best is {', '.join(f'{w:g}' for w in sorted(winners))} -- rung 3 gets retuned")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Benchmark context-selection policies.")
     parser.add_argument("root", nargs="?", default=".", help="repository to scan")
@@ -837,6 +929,10 @@ def main(argv: list[str]) -> int:
         help="run the ladder with each rung-2 knob disabled; the claims can lose",
     )
     parser.add_argument(
+        "--outline-sweep",
+        help="comma-separated outline shares, e.g. 0.2,0.4,0.6: rung 3's split",
+    )
+    parser.add_argument(
         "--focus",
         help="path of the file being edited; ranking favours it and its neighbours",
     )
@@ -857,6 +953,7 @@ def main(argv: list[str]) -> int:
 
     try:
         budgets = parse_budgets(args.sweep) if args.sweep else [args.budget]
+        shares = parse_shares(args.outline_sweep) if args.outline_sweep else []
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return 2
@@ -892,6 +989,9 @@ def main(argv: list[str]) -> int:
         return 2
 
     prepared = prepare(corpus, queries, rank)
+
+    if args.outline_sweep:
+        return report_outline_sweep(corpus, prepared, budgets, shares, args.json)
 
     if args.stop:
         return report_stop(corpus, prepared, budgets[0], args.json)
@@ -1028,6 +1128,25 @@ def selftest() -> int:
         )
         checks.append(("until_found reads past a missed window and answers", kept_reading))
         checks.append(("striking out costs less than reading on", used_one < used_kept))
+
+        no_map = chunks_ladder(
+            corpus, ranked, ["wqzmconstanttoken"], 300, outline_share=0.0
+        )
+        checks.append(
+            (
+                "outline_share=0 removes the map phase",
+                all(path.endswith(WINDOW_SUFFIX) for path, _ in no_map),
+            )
+        )
+        map_heavy = chunks_ladder(
+            corpus, ranked, ["wqzmconstanttoken"], 300, outline_share=0.9
+        )
+        checks.append(
+            (
+                "outline_share=0.9 keeps the map phase",
+                any(not path.endswith(WINDOW_SUFFIX) for path, _ in map_heavy),
+            )
+        )
 
         window = window_around(SELFTEST_FILES["core.py"], ["refresh_token"])
         checks.append(("window shows the hit line", "refresh_token" in window))

@@ -357,3 +357,28 @@ which is what the promotion rule is for.
 | authored | ~75 lines (bench, workflow, scoreboard, trace) |
 | read-back | the ablation block, the dispatch, the workflow steps |
 | executed | CI pending for 1.11.0 + 1.12.0 (one run covers both) |
+
+
+## Trace: the last untested constant
+
+Rung 3's outline share — 40% of the budget spent on declarations before any
+body is read — was set by judgement in 1.0.0 and never tested. On the real
+corpus that is up to 1,600 of the 4,000-token budget, the single largest
+unexamined allocation in the protocol. Bench 1.13.0 makes it a swept knob:
+`--outline-sweep 0.2,0.4,0.6` re-runs the ladder at each split with the
+ranking held fixed, at every budget the sweep already covers. The self-test
+pins both ends: share 0 removes the map phase entirely, 0.9 keeps it.
+
+Prediction recorded before the run: if recall per 1k is flat across shares,
+the constant is not load-bearing and stays; if another share wins, rung 3 gets
+retuned — the first time the ladder's own geometry, not just its ranking, can
+lose.
+
+### Countable units, this round
+
+| Unit | this round |
+| --- | --- |
+| calls | ~9 |
+| authored | ~90 lines (bench, workflow, scoreboard, trace) |
+| read-back | the sweep block, the dispatch, both workflow jobs |
+| executed | CI queued for 1.11.0 + 1.12.0 + 1.13.0 (one run covers all three) |
