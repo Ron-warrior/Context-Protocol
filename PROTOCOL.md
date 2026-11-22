@@ -26,6 +26,30 @@ and the anti-patterns.
 - Outlines are the cheapest useful unit: one line per declaration, ~10–15 tokens,
   and they tell you which file is worth a window.
 
+## Write side
+
+Retrieval is the cheap half. The v1.0.0 trace spent 824 lines authoring against 202
+lines of read-back and shipped three defects in the part nobody read, so the rules
+govern writes too:
+
+- **One unit per write.** A function, a section, a table — not a 400-line file.
+  Past ~120 lines in a single write, defects stop being findable: you will not
+  re-read it, and asking a reviewer to is another 4k tokens.
+- **Check before extending.** Before the next write to the same file, verify the
+  last one. The check is cheaper than the defect it catches.
+- **Read the diff, not the file.** For an edit to an existing file, `git_diff`
+  shows exactly what changed at a fraction of the tokens of re-reading the file.
+  For a new file, or one whose shape changed, read the region itself — a diff
+  against nothing shows you everything as added and tells you nothing about order.
+- **Arithmetic.** 120 lines is ~1.2k tokens to write and ~1.2k to read back, so
+  verifying a unit costs about what writing it did. Skipping the check saves half
+  the cost and returns defects at the rate measured in TRACE.md: three in the 441
+  lines of the first bench, all in the 239 lines never read.
+
+The asymmetry that makes this a rung rather than a preference: a retrieval mistake
+costs tokens and is caught by the next question; a write mistake ships, and the
+cheapest time to find it is before the file is closed.
+
 ## Memory schema
 
 Persist in the project, not in the chat. Four files, four jobs:
@@ -89,8 +113,9 @@ Otherwise it stays here, or in FINDINGS.md as an observation, or nowhere.
 
 A version is closed when, and only when, all four are true:
 
-1. **Read-back done.** The last operation on every region you edited was a read, in
-   this turn, after the edit. Not "I looked at it earlier".
+1. **Read-back done.** The last operation on every region you edited was a read in
+   this turn, after the edit — a `git_diff` of the file counts, and costs a
+   fraction of re-reading it. Not "I looked at it earlier".
 2. **Caller sweep done.** Every symbol whose signature, name or behaviour changed
    has had its callers grepped since the change.
 3. **Trace written.** TRACE.md has a row: calls, authored, read-back, coverage, and

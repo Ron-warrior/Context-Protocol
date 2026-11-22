@@ -77,3 +77,70 @@ benchmark that is supposed to justify the protocol.
 **That exchange rate is the argument for the rule.** Reviewing code you just
 wrote is not diligence theatre; at 46% coverage it was the difference between a
 harness that measures something and one that measures a bug.
+
+
+## Trace: v1.2.0–v1.5.0 — four versions in one turn
+
+Task: build the next version of this protocol *using* the current one, then use
+each new version while building the next. The question this trace answers: does
+the loop actually run, or does it only describe itself?
+
+### Countable units
+
+| Unit | v1.2.0–1.5.0 |
+| --- | --- |
+| calls | ~40 (counted to the closing check) |
+| authored | ~413 lines (99 README, 29 PROTOCOL, ~285 bench) |
+| read-back | ~540 lines, including a 272-line `git_diff` of the bench |
+| edited code regions verified on the first pass | 2 of 3 |
+| regions unverified until the closing check | 1 (`load_corpus`) |
+| defects found by read-back of this turn's own diff | 3 |
+| anything executed | **none** |
+
+### What each version was justified by
+
+- **1.2.0 — the write side.** Two countable facts, no theory. README v1.1.0 was
+  111 lines against its own "~100" rule stated in PROTOCOL.md line 3; and the
+  v1.0.0 trace showed 3 defects in the 239 authored lines nobody read. So the rung
+  was added *and paid for* by tightening the file to 99 lines rather than growing
+  it. Applied to itself the same turn: the 285-line bench change went in as 15
+  anchored edits of 1–108 lines, never as one overwrite of a 449-line file.
+- **1.3.0 — stop rules become measurable.** SCOREBOARD's hypothesis "stopping
+  bounds the misses; ranking only improves the hit rate" had no instrument, so it
+  was unfalsifiable. `--stop` is that instrument: same ranking, four stopping
+  rules, answer rate against tokens spent.
+- **1.4.0 — three defects in the bench itself**, found by reading it against rung
+  6. (i) `assemble` and `chunks_ladder` budgeted by different numbers, so a chunk
+  the policy counted as fitting could disappear at assembly — the policy paid for
+  a read it never got, biasing every policy that pre-counts. (ii) Files that
+  declare nothing — constants modules, config tables, scripts — had no outline, so
+  every map-based policy scored zero on them; that is precisely the class of file
+  a hard question turns on. (iii) `simulate_stop` re-tokenized every file for every
+  query, O(queries × corpus bytes), which on a 5k-file repo would have hung.
+- **1.5.0 — `--selftest`.** A harness nobody can run is a claim, and this one has
+  never run. Four fixture files encode those three defects as assertions, so the
+  first person to run the bench gets a pass/fail on the instrument before any
+  number from it means anything.
+
+Defect (iii) is the interesting one: it was introduced by 1.3.0 minutes earlier and
+caught by 1.3.0's own read-back, in the same turn, in the same file. That is the
+fast loop at its fastest — the version caught its own regression before the next
+version was built on top of it.
+
+### The rule that nearly failed
+
+The **closing check**, not the rung, caught that one edited region (`load_corpus`)
+had not been read back: I had read the region above it and the region below it and
+assumed the middle. Reading is cheap; assuming is the failure the rule exists to
+prevent. It is recorded here rather than quietly corrected, because a protocol that
+reports only its successful checks cannot be calibrated — and because the catch
+tells you which mechanism is load-bearing: read-back is enforced by the checklist,
+not by good intentions.
+
+### Still unmeasured
+
+Every number SCOREBOARD.md would report is still a prediction. Nothing executes on
+this device, so `--selftest`, the four policies and the four stop rules are correct
+by reading, not by running. The next honest step is not a sixth version: it is
+`python3 eval/retrieval_bench.py --selftest` on a machine with a Python, and a
+first real row in the version log that is not an argument.

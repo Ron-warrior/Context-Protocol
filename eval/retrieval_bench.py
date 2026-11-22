@@ -18,10 +18,19 @@ Metrics
     tokens              estimated tokens (chars / 4)
     recall_per_1k       recall / (tokens / 1000) -- effectiveness, per README
 
+Stop-rule mode (--stop)
+    Selection policy decides *which* tokens; a stop rule decides *when to give up*.
+    They are independent, and the second one is cheaper to get wrong: a good
+    ranking with no stop rule still burns the budget on a question the corpus
+    cannot answer. --stop holds the ranking fixed, reads in rank order, and
+    compares four stopping rules on answer rate against tokens spent.
+
 Usage
     python3 eval/retrieval_bench.py .
     python3 eval/retrieval_bench.py . --budget 4000 --auto 30
     python3 eval/retrieval_bench.py . --queries q.json
+    python3 eval/retrieval_bench.py . --stop
+    python3 eval/retrieval_bench.py --selftest
 
 Queries file:
     [{"question": "where is the token refreshed", "needles": ["refresh_token"]}]
@@ -40,6 +49,7 @@ import json
 import random
 import re
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -60,6 +70,7 @@ TEXT_EXT = {
 
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
+FALLBACK_OUTLINE_LINES = 12
 
 STOPWORDS = {
     "return", "import", "public", "private", "static", "string", "number",
@@ -100,11 +111,51 @@ class Corpus:
     edges: dict[str, set[str]] = field(default_factory=dict)
     outline: dict[str, list[str]] = field(default_factory=dict)
     stems: dict[str, list[str]] = field(default_factory=dict)
+    cost: dict[str, int] = field(default_factory=dict)
 
 
 def estimate_tokens(text: str) -> int:
     """Rough but consistent: ~4 characters per token."""
     return max(1, len(text) // 4)
+
+
+def chunk_cost(path: str, text: str) -> int:
+    """Cost of a chunk as assembled, header included.
+
+    Both `assemble` and `chunks_ladder` budget with this. While they budgeted
+    separately they disagreed by the header's ~9 tokens, so a chunk the policy
+    had counted as fitting could be dropped at assembly -- the policy then paid
+    for a read it never got. One function, one number.
+    """
+    return estimate_tokens(f"### {path}\n{text}")
+
+
+def outline_lines(text: str) -> list[str]:
+    """Declaration lines if the file declares anything, else its first real lines.
+
+    The fallback is load-bearing. Constants modules, config tables, scripts and
+    data files declare nothing, so without it they were invisible to every
+    map-based policy -- and a file that holds one crucial constant is exactly the
+    case a question turns on. A map that omits them is not a smaller map, it is a
+    wrong one.
+    """
+    lines = text.splitlines()
+    out: list[str] = []
+    for index, line in enumerate(lines):
+        if OUTLINE_RE.match(line):
+            out.append(f"{index + 1}: {line.strip()[:120]}")
+            if len(out) >= MAX_OUTLINE_LINES:
+                return out
+    if out:
+        return out
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", "//", "*", "/*", "--")):
+            continue
+        out.append(f"{index + 1}: {stripped[:120]}")
+        if len(out) >= FALLBACK_OUTLINE_LINES:
+            break
+    return out
 
 
 def load_corpus(root: Path) -> Corpus:
@@ -145,13 +196,8 @@ def load_corpus(root: Path) -> Corpus:
         corpus.edges[source.path] = targets
 
     for source in corpus.files:
-        lines = []
-        for index, line in enumerate(source.text.splitlines()):
-            if OUTLINE_RE.match(line):
-                lines.append(f"{index + 1}: {line.strip()[:120]}")
-                if len(lines) >= MAX_OUTLINE_LINES:
-                    break
-        corpus.outline[source.path] = lines
+        corpus.cost[source.path] = chunk_cost(source.path, source.text)
+        corpus.outline[source.path] = outline_lines(source.text)
 
     return corpus
 
@@ -274,7 +320,7 @@ def chunks_ladder(
         body = "\n".join(corpus.outline.get(source.path, []))
         if not body:
             continue
-        cost = estimate_tokens(body)
+        cost = chunk_cost(source.path, body)
         # continue, not break: a large outline must not starve every smaller one
         if used + cost > heading_budget:
             continue
@@ -287,7 +333,7 @@ def chunks_ladder(
         snippet = window_around(source.text, keywords)
         if not snippet:
             continue
-        cost = estimate_tokens(snippet)
+        cost = chunk_cost(f"{source.path} (excerpt)", snippet)
         if used + cost > budget:
             continue
         chunks.append((f"{source.path} (excerpt)", snippet))
@@ -303,7 +349,7 @@ def assemble(chunks: list[tuple[str, str]], budget: int) -> tuple[str, int]:
     for path, text in chunks:
         if not text.strip():
             continue
-        cost = estimate_tokens(text)
+        cost = chunk_cost(path, text)
         if used + cost > budget:
             continue
         parts.append(f"### {path}\n{text}")
@@ -316,6 +362,110 @@ def recall_of(context: str, needles: list[str]) -> float:
         return 0.0
     low = context.lower()
     return sum(1 for needle in needles if needle.lower() in low) / len(needles)
+
+
+# --- stop rules -------------------------------------------------------------
+#
+# The second experiment. Selection policy answers "which tokens"; a stopping rule
+# answers "when to give up". They are independent: a perfect ranking with no stop
+# rule still spends the whole budget on a question the corpus cannot answer.
+#
+# Files are read whole, in rank order, because the only variable here is *when to
+# stop*, not how to slice each read. Every rule is additionally bounded by the
+# token budget, so "never stop" is still finite and comparable.
+
+STOP_RULES: dict[str, int | None] = {
+    "until_found": None,
+    "three_strike": 3,
+    "two_strike": 2,
+    "one_strike": 1,
+}
+
+
+def files_holding(corpus: Corpus, needles: list[str]) -> set[str]:
+    """Files containing every needle: reading one of these answers the query."""
+    wanted = [needle.lower() for needle in needles]
+    if not wanted:
+        return set()
+    return {
+        source.path
+        for source in corpus.files
+        if all(needle in source.text.lower() for needle in wanted)
+    }
+
+
+def simulate_stop(
+    corpus: Corpus,
+    ranked: dict[str, float],
+    needles: list[str],
+    budget: int,
+    max_misses: int | None,
+) -> tuple[bool, int]:
+    """Read in rank order until answered, out of misses, or out of budget."""
+    holders = files_holding(corpus, needles)
+    order = sorted(corpus.files, key=lambda source: -ranked.get(source.path, 0.0))
+    used = 0
+    misses = 0
+    for source in order:
+        cost = corpus.cost[source.path]
+        if used + cost > budget:
+            break
+        used += cost
+        if source.path in holders:
+            return True, used
+        misses += 1
+        if max_misses is not None and misses >= max_misses:
+            break
+    return False, used
+
+
+def run_stop(corpus: Corpus, queries: list[dict], budget: int) -> dict[str, dict]:
+    """Cost of each stopping rule, with the ranking held fixed."""
+    prepared = []
+    for query in queries:
+        keywords = keywords_for(query)
+        prepared.append((query, pagerank(corpus, personalize(corpus, keywords))))
+
+    results: dict[str, dict] = {}
+    for rule, max_misses in STOP_RULES.items():
+        answered = 0
+        total_tokens = 0
+        for query, ranked in prepared:
+            found, used = simulate_stop(
+                corpus, ranked, query.get("needles", []), budget, max_misses
+            )
+            answered += 1 if found else 0
+            total_tokens += used
+        count = len(prepared) or 1
+        rate = answered / count
+        mean_tokens = total_tokens / count
+        results[rule] = {
+            "answer_rate": rate,
+            "tokens": mean_tokens,
+            "tokens_per_answer": (mean_tokens / rate) if rate else 0.0,
+            "answer_per_1k": (rate / (mean_tokens / 1000.0)) if mean_tokens else 0.0,
+        }
+    return results
+
+
+def report_stop(
+    corpus: Corpus, queries: list[dict], budget: int, as_json: bool
+) -> int:
+    results = run_stop(corpus, queries, budget)
+    if as_json:
+        print(json.dumps(results, indent=2))
+        return 0
+    print(f"files: {len(corpus.files)}  queries: {len(queries)}  budget: {budget} tokens\n")
+    print("| stop rule | answer rate | tokens | tokens/answer |")
+    print("| --- | --- | --- | --- |")
+    for name, metrics in results.items():
+        print(
+            f"| {name} | {metrics['answer_rate']:.3f} | "
+            f"{metrics['tokens']:.0f} | {metrics['tokens_per_answer']:.0f} |"
+        )
+    best = max(results.items(), key=lambda item: item[1]["answer_per_1k"])
+    print(f"\nbest answer rate per 1k tokens: {best[0]}")
+    return 0
 
 
 def auto_queries(corpus: Corpus, count: int, seed: int = 0) -> list[dict]:
@@ -399,7 +549,20 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--auto", type=int, default=25, help="auto-generate N queries")
     parser.add_argument("--seed", type=int, default=0, help="shuffle seed for auto mode")
     parser.add_argument("--json", action="store_true", help="emit JSON instead of a table")
+    parser.add_argument(
+        "--stop",
+        action="store_true",
+        help="compare stopping rules instead of selection policies",
+    )
+    parser.add_argument(
+        "--selftest",
+        action="store_true",
+        help="run the built-in fixture checks and exit",
+    )
     args = parser.parse_args(argv)
+
+    if args.selftest:
+        return selftest()
 
     root = Path(args.root).resolve()
     if not root.is_dir():
@@ -424,6 +587,9 @@ def main(argv: list[str]) -> int:
         print("no queries: pass --queries or use a corpus with distinctive identifiers", file=sys.stderr)
         return 1
 
+    if args.stop:
+        return report_stop(corpus, queries, args.budget, args.json)
+
     results = run(corpus, queries, args.budget)
 
     if args.json:
@@ -443,6 +609,94 @@ def main(argv: list[str]) -> int:
     best = max(results.items(), key=lambda item: item[1]["recall_per_1k"])
     print(f"\nbest recall per 1k tokens: {best[0]}")
     return 0
+
+
+# --- self-test --------------------------------------------------------------
+#
+# Four files, chosen to cover the defects this harness actually had: a
+# declaration-less file (invisible to the map before 1.4.0), a needle in exactly
+# one file, an import edge, and a file with nothing to do with anything.
+
+SELFTEST_FILES = {
+    "core.py": """
+class WidgetStore:
+    def refresh_token(self):
+        return "ZxqvNeedleToken"
+""",
+    "constants.py": """
+FIRST_LIMIT = 12
+WIDGET_ALPHA_TOKEN = "WqzmConstantToken"
+""",
+    "main.py": """
+from core import WidgetStore
+
+
+def run():
+    return WidgetStore()
+""",
+    "noise.py": """
+def unrelated_thing():
+    return 0
+""",
+}
+
+
+def selftest() -> int:
+    """Prove the harness before trusting its numbers on a real repository."""
+    checks: list[tuple[str, bool]] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        for name, body in SELFTEST_FILES.items():
+            (root / name).write_text(body.strip() + "\n", encoding="utf-8")
+        corpus = load_corpus(root)
+
+        checks.append(("loads every fixture", len(corpus.files) == len(SELFTEST_FILES)))
+        checks.append(("token estimate floors at 1", estimate_tokens("a") == 1))
+        checks.append(
+            (
+                "chunk cost includes its header",
+                chunk_cost("x.py", "abc") > estimate_tokens("abc"),
+            )
+        )
+        checks.append(
+            (
+                "needle resolves to one file",
+                files_holding(corpus, ["ZxqvNeedleToken"]) == {"core.py"},
+            )
+        )
+        checks.append(
+            (
+                "declaration-less file gets an outline",
+                bool(corpus.outline.get("constants.py")),
+            )
+        )
+
+        flat = {source.path: 1.0 for source in corpus.files}
+        mapped = dict(chunks_pagerank_map(corpus, flat))
+        checks.append(("map includes the constants file", "constants.py" in mapped))
+
+        ranked = pagerank(corpus, personalize(corpus, ["WqzmConstantToken"]))
+        text, used = assemble(chunks_ladder(corpus, ranked, ["wqzmconstanttoken"], 300), 300)
+        checks.append(("ladder stays inside the budget", used <= 300))
+        checks.append(("ladder reaches the needle", "WqzmConstantToken" in text))
+
+        _, small = assemble(chunks_read_all(corpus), 40)
+        checks.append(("read_all cannot exceed a small budget", small <= 40))
+
+        found, _ = simulate_stop(corpus, ranked, ["WqzmConstantToken"], 100_000, None)
+        checks.append(("unstoppable rule answers", found))
+        walled, _ = simulate_stop(corpus, ranked, ["WqzmConstantToken"], 1, None)
+        checks.append(("a budget wall stops even that rule", not walled))
+
+        window = window_around(SELFTEST_FILES["core.py"], ["refresh_token"])
+        checks.append(("window shows the hit line", "refresh_token" in window))
+
+    failed = 0
+    for label, passed in checks:
+        print(("PASS  " if passed else "FAIL  ") + label)
+        failed += 0 if passed else 1
+    print(f"\n{len(checks) - failed}/{len(checks)} checks passed")
+    return 0 if failed == 0 else 1
 
 
 if __name__ == "__main__":
