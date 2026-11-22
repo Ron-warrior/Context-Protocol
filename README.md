@@ -26,8 +26,20 @@ pipx install git+https://github.com/Ron-warrior/Context-Protocol
 ctx query . "how are errors handled"
 ```
 
-No dependencies. Standard library only. `ctx map`, `ctx query`, `ctx bench`,
-`ctx selftest`.
+No dependencies. Standard library only.
+
+```bash
+ctx ask "how are errors handled"     # path defaults to .
+ctx query . "auth refresh" --explain # show why each file ranked
+ctx path User Store                  # files mentioning both, with line numbers
+ctx map .                            # file map with line sizes
+ctx bench . --queries 25             # recall, then tokens, then ms
+ctx plan                             # the ladder as a checklist
+ctx selftest                         # fixtures; exit 0 means it works
+```
+
+Per-project defaults live in `.ctxrc` (`budget=6000`, `expand=off`); `.gitignore`
+is honoured.
 
 ## Objective
 

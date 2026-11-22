@@ -438,7 +438,8 @@ def build_context(files: list[Source], words: list[str], budget: int, expand: bo
                         add(f"{second} (two hops from {source.path})", block)
 
     body = "\n\n".join(f"### {label}\n{block}" for label, block in chunks)
-    return body, used, len(chunks)
+    header = f"# context ({len(chunks)} chunks, ~{used} tokens)\n"
+    return header + body, used, len(chunks)
 
 
 def build_context_lean(files: list[Source], words: list[str], budget: int):
@@ -573,6 +574,57 @@ def cmd_query(args) -> int:
     return 0
 
 
+def cmd_path(args) -> int:
+    """Files that mention both symbols, and the lines that connect them.
+
+    The cheapest structural answer there is: if a file mentions A and B, that
+    file is where the relationship lives. No graph needed.
+    """
+    files = load(Path(args.path))
+    if not files:
+        print("no source files", file=sys.stderr)
+        return 1
+    first, second = args.a.lower(), args.b.lower()
+    found = 0
+    for source in files:
+        low = source.text.lower()
+        if first not in low or second not in low:
+            continue
+        lines_a = hit_lines(source, [first])[:1]
+        lines_b = hit_lines(source, [second])[:1]
+        if not lines_a or not lines_b:
+            continue
+        found += 1
+        print(f"{source.path}")
+        print(f"  {args.a}: {lines_a[0] + 1}")
+        print(f"  {args.b}: {lines_b[0] + 1}")
+    if not found:
+        print(f"no file mentions both {args.a!r} and {args.b!r}", file=sys.stderr)
+        return 1
+    return 0
+
+
+LADDER = (
+    "0. Frame        one line: what would count as the answer",
+    "1. Map          grep -rl for the question's keywords; files, not contents",
+    "2. Rank         definition hit > usage hit; near > far; small > large",
+    "3. Outline      signatures only, to choose a body before reading one",
+    "4. Scope        read the enclosing block of the best hit, not a +-4 window",
+    "5. Write        small verified units; past ~120 lines you will not re-read it",
+    "6. Verify       read back, sweep callers, and run it if it runs",
+    "7. Persist      write what you learned into the repo, not just the chat",
+)
+
+
+def cmd_plan(_args) -> int:
+    """The ladder as a checklist, for agents with no shell and no install."""
+    print("Context Protocol -- objective: intelligence, then tokens, then speed.\n")
+    for rung in LADDER:
+        print(f"  [ ] {rung}")
+    print("\nStop: ~4k tokens per question. Two misses means change rung, not read a third file.")
+    return 0
+
+
 def cmd_bench(args) -> int:
     files = load(Path(args.path))
     if not files:
@@ -629,6 +681,19 @@ def cmd_bench(args) -> int:
     for mean_recall, mean_tokens, mean_ms, name in rows:
         print(f"| {name} | {mean_recall:.3f} | {mean_tokens:.0f} | {mean_ms:.1f} |")
     print(f"\nbest by recall, then tokens, then ms: {rows[0][3]}")
+
+    # The comparison that matters for the objective: what did intelligence-first
+    # buy on recall, and what did it cost in tokens?
+    by_name = {name: (recall, tokens_) for recall, tokens_, _ms, name in rows}
+    if "intelligence" in by_name and "lean" in by_name:
+        ai_recall, ai_tokens = by_name["intelligence"]
+        lean_recall, lean_tokens = by_name["lean"]
+        print(
+            f"\nintelligence vs lean: recall {ai_recall - lean_recall:+.3f}, "
+            f"tokens {ai_tokens - lean_tokens:+.0f}"
+        )
+        if ai_recall <= lean_recall and ai_tokens >= lean_tokens:
+            print("lean wins on both -- intelligence-first is paying for nothing here")
     return 0
 
 
@@ -692,9 +757,10 @@ def cmd_selftest(_args) -> int:
         body, used, chunks = build_context(files, ["refresh", "token"], 4000)
         assert "refresh_token" in body, "the context must surface the needle"
         assert "value.strip()" in body, "the enclosing body must be complete, not a +-4 window"
+        assert body.startswith("# context ("), "the context must say what it is"
         assert used <= 4000, f"budget exceeded: {used}"
         assert chunks >= 1, "expected at least one chunk"
-        checks += 3
+        checks += 4
 
         _tight, tight_used, _ = build_context(files, ["refresh", "token"], 64)
         assert tight_used <= 64, f"budget exceeded on the tight run: {tight_used}"
@@ -765,6 +831,15 @@ def main(argv: list[str] | None = None) -> int:
 
     p_self = sub.add_parser("selftest", help="run fixtures")
     p_self.set_defaults(func=cmd_selftest)
+
+    p_path = sub.add_parser("path", help="files mentioning two symbols")
+    p_path.add_argument("a")
+    p_path.add_argument("b")
+    p_path.add_argument("path", nargs="?", default=".")
+    p_path.set_defaults(func=cmd_path)
+
+    p_plan = sub.add_parser("plan", help="the ladder as a checklist")
+    p_plan.set_defaults(func=cmd_plan)
 
     args = parser.parse_args(argv)
     return args.func(args)
