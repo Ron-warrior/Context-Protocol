@@ -91,22 +91,81 @@ def split_identifier(token: str) -> list[str]:
     return [part.lower() for part in SPLIT_RE.split(token) if part]
 
 
+def stem(word: str) -> str:
+    """Crude suffix stripping so 'errors' finds 'error' and 'handled' finds 'handle'.
+
+    Deliberately not a real stemmer: no dependency, no dictionary, and every rule
+    only ever shortens, so it can widen a match but never invent one.
+    """
+    for suffix in ("ing", "ed", "es", "s"):
+        if len(word) > len(suffix) + 3 and word.endswith(suffix):
+            return word[: -len(suffix)]
+    return word
+
+
 def words_of(question: str) -> list[str]:
     found: list[str] = []
     for token in IDENT_RE.findall(question):
         for part in split_identifier(token):
-            if len(part) > 1 and part not in STOPWORDS and part not in found:
-                found.append(part)
+            if len(part) > 1 and part not in STOPWORDS:
+                for form in (part, stem(part)):
+                    if form and form not in found:
+                        found.append(form)
     return found
+
+
+def ignore_patterns(root: Path) -> list[str]:
+    """Directory names, file names and *.ext patterns from the project's .gitignore.
+
+    Simple on purpose: no negation, no globstar. A wrong include costs tokens; a
+    wrong exclude costs the answer, so only patterns that are unambiguous here are
+    honoured.
+    """
+    path = root / ".gitignore"
+    if not path.is_file():
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    patterns: list[str] = []
+    for line in lines:
+        text = line.strip()
+        if not text or text.startswith("#") or text.startswith("!"):
+            continue
+        patterns.append(text.rstrip("/"))
+    return patterns
+
+
+def is_ignored(rel: Path, patterns: list[str]) -> bool:
+    if not patterns:
+        return False
+    parts = rel.parts
+    name = rel.name
+    for pattern in patterns:
+        if "/" in pattern:
+            if str(rel).startswith(pattern):
+                return True
+            continue
+        if pattern in parts:
+            return True
+        if pattern == name:
+            return True
+        if pattern.startswith("*.") and name.endswith(pattern[1:]):
+            return True
+    return False
 
 
 def load(root: Path) -> list[Source]:
     files: list[Source] = []
+    ignores = ignore_patterns(root)
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
         rel = path.relative_to(root)
         if any(part in SKIP_DIRS for part in rel.parts[:-1]):
+            continue
+        if is_ignored(rel, ignores):
             continue
         if path.suffix.lower() not in TEXT_EXT:
             continue
@@ -163,6 +222,25 @@ def hit_lines(source: Source, words: list[str]) -> list[int]:
         if any(word in low for word in words):
             hits.append(index)
     return hits
+
+
+def best_hit_lines(source: Source, words: list[str], limit: int = 2) -> list[int]:
+    """The most informative lines, not the first ones.
+
+    A line carrying three query words says more about the answer than a line
+    carrying one, and a declaration line more than a mention. Deterministic:
+    ties fall back to the earlier line.
+    """
+    scored: list[tuple[int, int, int]] = []
+    for index, line in enumerate(source.text.splitlines()):
+        low = line.lower()
+        distinct = sum(1 for word in words if word in low)
+        if not distinct:
+            continue
+        bonus = 2 if DEF_RE.match(line) else 0
+        scored.append((distinct + bonus, -index, index))
+    scored.sort(reverse=True)
+    return [index for _score, _neg, index in scored[:limit]]
 
 
 def enclosing_block(text: str, hit: int) -> tuple[int, int]:
@@ -245,7 +323,7 @@ def build_context(files: list[Source], words: list[str], budget: int, expand: bo
 
     # Phase 1 — the answer itself: the enclosing block of the best matches.
     for _score, source in ranked[:3]:
-        for hit in hit_lines(source, words)[:2]:
+        for hit in best_hit_lines(source, words):
             start, end = enclosing_block(source.text, hit)
             if (source.path, start, end) in seen:
                 continue
@@ -261,7 +339,7 @@ def build_context(files: list[Source], words: list[str], budget: int, expand: bo
     # Phase 3 — blocks in files that matched but were not the top three.
     for _score, source in ranked[3:]:
         pieces: list[str] = []
-        for hit in hit_lines(source, words)[:1]:
+        for hit in best_hit_lines(source, words, 1):
             start, end = enclosing_block(source.text, hit)
             if (source.path, start, end) in seen:
                 continue
@@ -363,6 +441,10 @@ def cmd_query(args) -> int:
         print("no source files", file=sys.stderr)
         return 1
     words = words_of(args.question)
+    if getattr(args, "explain", False):
+        print("rank (score  path)", file=sys.stderr)
+        for score, source in rank(files, words)[:5]:
+            print(f"{score:8.2f}  {source.path}", file=sys.stderr)
     started = time.perf_counter()
     if args.lean:
         body, used, chunks = build_context_lean(files, words, args.budget)
@@ -455,6 +537,18 @@ def cmd_selftest(_args) -> int:
     assert split_identifier("refresh_token") == ["refresh", "token"], "snake_case split"
     checks += 2
 
+    assert stem("errors") == "error", "plural stem"
+    assert stem("handled") == "handl", "past-tense stem"
+    checks += 2
+
+    assert is_ignored(Path("build/x.py"), ["build"]), "ignore a directory"
+    assert not is_ignored(Path("src/x.py"), ["build"]), "keep an unrelated path"
+    checks += 2
+
+    sample = Source("f.py", "x\nrefresh token here\nrefresh\n")
+    assert best_hit_lines(sample, ["refresh", "token"])[0] == 1, "the two-word line ranks first"
+    checks += 1
+
     words = words_of("where is the refresh token")
     assert "refresh" in words and "the" not in words, f"stopwords leaked: {words}"
     checks += 1
@@ -538,8 +632,19 @@ def main(argv: list[str] | None = None) -> int:
     p_query.add_argument("--budget", type=int, default=4000)
     p_query.add_argument("--lean", action="store_true", help="token-first baseline")
     p_query.add_argument("--no-expand", dest="expand", action="store_false")
+    p_query.add_argument("--explain", action="store_true", help="print the ranking")
     p_query.add_argument("--json", action="store_true")
     p_query.set_defaults(func=cmd_query)
+
+    p_ask = sub.add_parser("ask", help="query, with the path defaulting to .")
+    p_ask.add_argument("question")
+    p_ask.add_argument("path", nargs="?", default=".")
+    p_ask.add_argument("--budget", type=int, default=4000)
+    p_ask.add_argument("--lean", action="store_true", help="token-first baseline")
+    p_ask.add_argument("--no-expand", dest="expand", action="store_false")
+    p_ask.add_argument("--explain", action="store_true", help="print the ranking")
+    p_ask.add_argument("--json", action="store_true")
+    p_ask.set_defaults(func=cmd_query)
 
     p_bench = sub.add_parser("bench", help="recall, then tokens, then time")
     p_bench.add_argument("path")
