@@ -234,3 +234,57 @@ thing it actually returns.
 If graphify's query output beats the ladder on recall per 1k on the corpus, then the
 claim in this file is wrong and the protocol loses honestly. The comparison script
 prints both; it does not assume which wins.
+
+
+## The head-to-head, measured
+
+Same corpus (freellmapi, 795 files), same question generator (identifiers appearing
+in at most two files), same needles. graphify 0.9.115 built its own graph:
+**6,260 nodes, 19,435 edges, 209 communities**, from 782 code files, in its own
+pipeline. Then each tool was scored on the same metric — is the answer in what it
+returned, per token spent.
+
+| tool | recall | tokens | recall per 1k |
+| --- | --- | --- | --- |
+| graphify `query` | **0.320** | 2,269 | 0.141 |
+| `ctx` (intelligence-first) | **0.720** | 2,876 | 0.250 |
+
+**`ctx` retrieves 2.25x as many answers for 27% more tokens.** On the same run,
+**13 of 25 graphify queries returned no matching nodes at all** — 52% of questions
+answered with nothing.
+
+That last number is the important one, not the ratio. The needles were
+*identifiers*: `keylessDecisionProvider`, `normalizeGroupLabel`. A keyword-seeded
+BFS over a 6,260-node graph is being asked to find a node whose name it was handed.
+That is graphify's home turf, and it returns nothing more than half the time.
+
+### And the claim it publishes
+
+graphify's own benchmark on this corpus, from the same run:
+
+```
+Corpus: 313,000 words -> ~417,333 tokens (naive)
+Graph:  6,260 nodes, 19,435 edges
+Avg query cost: ~1,618 tokens
+Reduction: 257.9x fewer tokens per query
+```
+
+257.9x. Against a corpus size **estimated as `node_count * 50` words** (see
+`graphify/benchmark.py:77`), divided by the size of its own output, with no check
+that the answer is in it. A query that returns `"No matching nodes found."` scores
+a perfect 257.9x reduction, because an empty answer is maximally compressed.
+
+That is the whole argument, in one pair of numbers: **257.9x compression, 32%
+recall.** The compression was never the thing that mattered.
+
+### Caveats, stated
+
+- 25 queries, one corpus, auto-generated questions. Directional, not settled.
+- `ctx` used 27% more tokens. Under intelligence-first that is the correct trade;
+  under a pure compression metric graphify wins by construction.
+- graphify was run `--code-only` with `GRAPHIFY_BACKEND=none`, which is its
+  documented offline path. The semantic pass over docs would not help it find a
+  code identifier.
+- Both tools were scored by *my* metric. That is a real bias, which is why the
+  metric is published above and the harness (`eval/compare_graphify.py`) is in the
+  repo for anyone to run differently.
