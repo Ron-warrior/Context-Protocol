@@ -48,6 +48,7 @@ Policies compared, in one pass, at the same budget:
 | 1.7.0 | `--sweep 1000,4000,16000`: recall per 1k at several budgets, and whether the winner holds | One budget is one point. A policy that wins at 4k can lose at 16k, and the protocol's budget-cap rule is only justified if the ranking holds across the cap | Kept |
 | 1.8.0 | Bench: `run_stop` unpacked a 2-tuple from the 3-tuple `prepare` now returns (would have crashed `--stop`); `--queries` load errors reported cleanly; `--sweep` and `--focus` validated in `main` | Read-back of the 1.6.0 region after the edit found the crash. Caller sweep then covered every changed signature | Kept |
 | 1.9.0 | `report_stop` printed an undefined `queries` (crash on `--stop`); `tokens_per_answer` reports `inf` instead of a flattering `0` when a rule answers nothing; CI workflow compiles, self-tests and smoke-runs every mode | CI run 45064682765. The undefined name had survived an explicit read-back of its own region — reading a line is not checking a line | Kept |
+| 1.10.0 | Bench: `--stop` walks the ladder's scoped chunks (outlines, then windows) instead of whole files; a miss is one chunk read without the needle; three new self-test assertions (20 total) | Real-corpus run 45074848996 (795 files): three of four stop rules returned identical tokens (3,042 per query) at a 4% answer rate — whole-file reads hit the 4k wall before any strike rule could fire, so the experiment measured read granularity, not stopping. Chunk-level reads are what rung 4 prescribes | Kept |
 
 ## First measured results
 
@@ -75,6 +76,37 @@ What this does and does not say:
 - **Seven files is not a corpus.** The auto queries come from this repo's own rare
   identifiers and one file is 930 lines of the bench itself. The ranking claim
   needs 50+ files before it counts as evidence about real codebases.
+
+## First real corpus
+
+CI run 45074848996: [freellmapi](https://github.com/tashfeenahmed/freellmapi),
+sparse checkout of `server/src`, `shared` and `cli` — 795 files, 25 auto
+queries. The first numbers from a codebase this protocol was not written against.
+
+recall per 1k tokens, by budget:
+
+| policy | 1,000 | 4,000 | 16,000 |
+| --- | --- | --- | --- |
+| read_all | 0.000 | 0.000 | 0.003 |
+| grep_files | 0.000 | 0.108 | 0.040 |
+| pagerank_map | 0.121 | 0.070 | 0.023 |
+| **ladder** | **0.567** | **0.213** | **0.058** |
+
+What this says:
+
+- **The ranking claim survives its first real test.** Ladder best at 1k, 4k and
+  16k — 5x grep at 1k, 2x at 4k. The winner did not change with the budget, so
+  it is not a one-point artifact.
+- **The `pagerank_map` recovery prediction was half right.** At 1k it beats grep
+  (0.121 vs 0.000), which it never did on seven files — that import graph was
+  too sparse for PageRank to say anything. But it still loses to the ladder at
+  every budget: a map narrows the search, the scoped windows win it.
+- **The stop-rule table from this run is a result about the instrument, not
+  about stop rules**, and is recorded as such rather than quoted: three of four
+  rules returned identical tokens (3,042 per query) at a 4% answer rate because
+  whole-file reads hit the budget wall before any strike rule could fire. Bench
+  1.10.0 rewrites `--stop` over the ladder's chunks; the next run's numbers
+  replace this.
 
 Later versions append a row. Reverted changes stay in the table, marked reverted,
 with the number that killed them. Deleting a failed change hides the only thing
@@ -124,7 +156,9 @@ Queued, not yet tested. Cheap to test, so test them rather than arguing:
 
 
 
-**Versioning note.** The protocol (README.md) is at 1.2.0. The bench has its own
-version track from 1.4.0 on, because it changed and the protocol did not. Rows
-1.6.0–1.8.0 are bench versions; they do not bump the protocol, and no rule in
-README.md changed to justify one. A protocol bump needs a rule that changed.
+**Versioning note.** The protocol (README.md) is at 1.3.0 — rung 6(c) ("if the
+project runs, run it") was added after the `NameError` CI run caught a defect
+that survived a read-back. The bench has its own version track from 1.4.0 on,
+because it changed and the protocol did not. Rows 1.6.0–1.10.0 are bench
+versions; they do not bump the protocol, and no rule in README.md changed to
+justify one. A protocol bump needs a rule that changed.

@@ -242,3 +242,45 @@ for rung 6(c): if the project can run, run it.
 The cost of the miss was one CI run and one round of fixes. The cost without CI
 would have been every user invocation of `--stop`, since the crash was on the
 report path rather than in the computation.
+
+
+## Trace: first real corpus — one claim held, one instrument failed
+
+CI run 45074848996: freellmapi sparse checkout (`server/src`, `shared`, `cli`),
+795 files, 25 auto queries, budgets 1k/4k/16k. The first measurement on a
+codebase the protocol was not written against.
+
+| Result | Outcome |
+| --- | --- |
+| sweep | ladder best at every budget: 0.567 / 0.213 / 0.058 recall per 1k |
+| pagerank_map at 1k | 0.121 — beats grep (0.000) for the first time, as predicted from edge sparsity on the 7-file repo |
+| stop rules | all four identical: 3,042 tokens, 4% answer rate — **instrument failure** |
+
+The stop failure is the finding of the round. `simulate_stop` walked whole
+files in rank order; in a 795-file TypeScript repo a single file often costs
+more than the entire budget, so the wall ended every walk before a strike rule
+could fire and three rules returned byte-identical tokens. The experiment was
+measuring read granularity and calling it stopping. This defect was invisible
+on the 7-file fixture — the first one only a real corpus could surface.
+
+Bench 1.10.0 rewrites the walk over the ladder's chunks (outlines, then scoped
+windows) — what rung 4 actually prescribes. The self-test grew assertions for
+both directions: one strike must quit on a missed outline chunk, and
+until_found must read on and answer, paying more.
+
+### Countable units, this round
+
+| Unit | this round |
+| --- | --- |
+| calls | ~14 |
+| authored | ~70 lines (bench, scoreboard, trace) |
+| read-back | every edited region, plus the CI log that found the defect |
+| defects found | 1 — by the corpus, not by reading |
+| executed | CI: selftest, real-corpus sweep, stop mode |
+
+### What is still not established
+
+The stop-rule hypothesis still has no valid number: chunk-level `--stop` has
+not run yet, and its CI run is the next evidence either way. The ladder's 0.567
+at 1k comes from auto-generated rare-identifier queries — real questions have
+synonyms and paraphrases, and the protocol has no instrument for that yet.

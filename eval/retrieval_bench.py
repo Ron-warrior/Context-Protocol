@@ -22,8 +22,11 @@ Stop-rule mode (--stop)
     Selection policy decides *which* tokens; a stop rule decides *when to give up*.
     They are independent, and the second one is cheaper to get wrong: a good
     ranking with no stop rule still burns the budget on a question the corpus
-    cannot answer. --stop holds the ranking fixed, reads in rank order, and
-    compares four stopping rules on answer rate against tokens spent.
+    cannot answer. --stop holds the ranking fixed and walks the ladder's chunks
+    (outlines, then scoped windows) in reading order, comparing four stopping
+    rules on answer rate against tokens spent. It first walked whole files; on
+    the real corpus (795 files) the budget wall ended every walk before a strike
+    rule could fire, which measured read granularity instead of stopping.
 
 Usage
     python3 eval/retrieval_bench.py .
@@ -480,9 +483,16 @@ def recall_of(context: str, needles: list[str]) -> float:
 # answers "when to give up". They are independent: a perfect ranking with no stop
 # rule still spends the whole budget on a question the corpus cannot answer.
 #
-# Files are read whole, in rank order, because the only variable here is *when to
-# stop*, not how to slice each read. Every rule is additionally bounded by the
-# token budget, so "never stop" is still finite and comparable.
+# The walk is over the ladder's chunks -- outlines, then scoped windows in rank
+# order -- because that is what rung 4 actually prescribes. The first version
+# walked whole files, and on the real corpus (795 files) the budget wall ended
+# every walk before a strike rule could fire: identical tokens under three of the
+# four rules and a 4% answer rate. That result measured read granularity, not
+# stopping. A 40-line window costs a fraction of what a whole file does.
+#
+# A miss is a chunk read that did not contain the needle -- the same proxy the
+# recall metric uses. Every rule is additionally bounded by the token budget, so
+# "never stop" is still finite and comparable.
 
 STOP_RULES: dict[str, int | None] = {
     "until_found": None,
@@ -506,21 +516,26 @@ def files_holding(corpus: Corpus, needles: list[str]) -> set[str]:
 def simulate_stop(
     corpus: Corpus,
     ranked: dict[str, float],
+    keywords: list[str],
     needles: list[str],
     budget: int,
     max_misses: int | None,
 ) -> tuple[bool, int]:
-    """Read in rank order until answered, out of misses, or out of budget."""
-    holders = files_holding(corpus, needles)
-    order = sorted(corpus.files, key=lambda source: -ranked.get(source.path, 0.0))
+    """Read the ladder's chunks in order until answered, out of strikes, or out
+    of budget. A miss is one chunk read that did not contain the needles."""
+    if not needles:
+        return False, 0
+    chunks = chunks_ladder(corpus, ranked, keywords, budget)
     used = 0
     misses = 0
-    for source in order:
-        cost = corpus.cost[source.path]
+    for path, text in chunks:
+        cost = chunk_cost(path, text)
+        # chunks_ladder already respects the budget; the guard keeps that true
+        # if the chunk builder ever changes under it.
         if used + cost > budget:
             break
         used += cost
-        if source.path in holders:
+        if all(mentions(text, needle) for needle in needles):
             return True, used
         misses += 1
         if max_misses is not None and misses >= max_misses:
@@ -538,9 +553,9 @@ def run_stop(
     for rule, max_misses in STOP_RULES.items():
         answered = 0
         total_tokens = 0
-        for query, _keywords, ranked in prepared:
+        for query, keywords, ranked in prepared:
             found, used = simulate_stop(
-                corpus, ranked, query.get("needles", []), budget, max_misses
+                corpus, ranked, keywords, query.get("needles", []), budget, max_misses
             )
             answered += 1 if found else 0
             total_tokens += used
@@ -883,10 +898,29 @@ def selftest() -> int:
         _, small = assemble(chunks_read_all(corpus), 40)
         checks.append(("read_all cannot exceed a small budget", small <= 40))
 
-        found, _ = simulate_stop(corpus, ranked, ["WqzmConstantToken"], 100_000, None)
+        found, _ = simulate_stop(
+            corpus, ranked, ["wqzmconstanttoken"], ["WqzmConstantToken"], 100_000, None
+        )
         checks.append(("unstoppable rule answers", found))
-        walled, _ = simulate_stop(corpus, ranked, ["WqzmConstantToken"], 1, None)
+        walled, _ = simulate_stop(
+            corpus, ranked, ["wqzmconstanttoken"], ["WqzmConstantToken"], 1, None
+        )
         checks.append(("a budget wall stops even that rule", not walled))
+
+        # ZxqvNeedleToken lives in a method body, not in any outline, so the
+        # first chunk -- the top-ranked file's outline -- is a miss. One strike
+        # must quit before the window that answers; until_found must read on
+        # and reach it, paying more for the privilege.
+        ranked_body = pagerank(corpus, personalize(corpus, ["zxqvneedletoken"]))
+        quit_early, used_early = simulate_stop(
+            corpus, ranked_body, ["zxqvneedletoken"], ["ZxqvNeedleToken"], 100_000, 1
+        )
+        checks.append(("one strike quits on a missed chunk", not quit_early))
+        kept_reading, used_full = simulate_stop(
+            corpus, ranked_body, ["zxqvneedletoken"], ["ZxqvNeedleToken"], 100_000, None
+        )
+        checks.append(("until_found reads on and answers", kept_reading))
+        checks.append(("striking out costs less than reading on", used_early < used_full))
 
         window = window_around(SELFTEST_FILES["core.py"], ["refresh_token"])
         checks.append(("window shows the hit line", "refresh_token" in window))
