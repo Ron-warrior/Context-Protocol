@@ -349,31 +349,63 @@ def declared_symbols(source: Source, limit: int = 6) -> list[str]:
     return names[:limit]
 
 
-def call_sites(files: list[Source], symbols: list[str], skip: set[str], limit: int = 4):
+def symbol_index(files: list[Source]) -> dict[str, list[str]]:
+    """Invert the per-file identifier sets once: symbol -> files containing it.
+
+    Built from the loaded corpus, not cached to disk, so it can never be stale.
+    Without it, call_sites rescans every file for every query, which is what made
+    a 100-query benchmark crawl.
+    """
+    index: dict[str, list[str]] = {}
+    for source in files:
+        for symbol in source.symbols:
+            index.setdefault(symbol, []).append(source.path)
+    return index
+
+
+def call_sites(
+    files: list[Source],
+    symbols: list[str],
+    skip: set[str],
+    limit: int = 4,
+    index: dict[str, list[str]] | None = None,
+):
     """Where the declared names are used, outside the files already included.
 
     The answer to "how does X work" is often half in the definition and half in
     the caller that decides when it runs.
     """
+    if index is None:
+        index = symbol_index(files)
+    by_path = {source.path: source for source in files}
     found: list[tuple[str, int, int]] = []
-    if not symbols:
-        return found
-    for source in files:
-        if source.path in skip:
-            continue
-        low = source.text.lower()
-        if not any(symbol in low for symbol in symbols):
-            continue
-        for hit in hit_lines(source, symbols)[:1]:
-            start = max(0, hit - 6)
-            end = min(len(source.text.splitlines()), hit + 7)
-            found.append((source.path, start, end))
+    visited: set[str] = set()
+    for symbol in symbols:
+        for path in index.get(symbol, ()):
+            if path in skip or path in visited:
+                continue
+            source = by_path.get(path)
+            if not source:
+                continue
+            hits = hit_lines(source, [symbol])[:1]
+            if not hits:
+                continue
+            visited.add(path)
+            start = max(0, hits[0] - 6)
+            end = min(len(source.lines), hits[0] + 7)
+            found.append((path, start, end))
             if len(found) >= limit:
                 return found
     return found
 
 
-def build_context(files: list[Source], words: list[str], budget: int, expand: bool = True):
+def build_context(
+    files: list[Source],
+    words: list[str],
+    budget: int,
+    expand: bool = True,
+    index: dict[str, list[str]] | None = None,
+):
     """Intelligence first, then cost. Returns (text, tokens_used, chunks)."""
     ranked = rank(files, words)
     if not ranked:
@@ -450,7 +482,7 @@ def build_context(files: list[Source], words: list[str], budget: int, expand: bo
                 if name not in symbols:
                     symbols.append(name)
         included = {source.path for _score, source in ranked[:3]}
-        for path, start, end in call_sites(files, symbols, included):
+        for path, start, end in call_sites(files, symbols, included, index=index):
             add(f"{path}:{start + 1}-{end} (call site)", numbered(
                 next(f for f in files if f.path == path).text, start, end))
 
@@ -708,8 +740,12 @@ def cmd_bench(args) -> int:
     def lean(words):
         return build_context_lean(files, words, args.budget)[:2]
 
+    # Inverted once per run, not per query: call_sites would otherwise rescan the
+    # whole corpus for every question.
+    index = symbol_index(files)
+
     def intelligence(words):
-        return build_context(files, words, args.budget)[:2]
+        return build_context(files, words, args.budget, index=index)[:2]
 
     policies = {
         "read_all": read_all,
