@@ -71,9 +71,15 @@ jobs:
         run: |
           set -euo pipefail
           python3 ctx.py --version
-          # The stamp drifts when versions are bumped by hand; catch it.
-          grep -q '__version__ = "' ctx.py
-          grep -q "Version: 2\." README.md
+          # The stamp drifted twice tonight (2.6.0 at 2.12.0, 2.10.0 at 2.13.0).
+          # Compare the two strings exactly instead of trusting a manual bump.
+          code=$(grep -oE '__version__ = "[0-9.]+"' ctx.py | grep -oE '[0-9.]+')
+          readme=$(grep -oE 'Version: [0-9]+\.[0-9]+\.[0-9]+' README.md | grep -oE '[0-9.]+')
+          echo "code=$code readme=$readme"
+          [ "$code" = "$readme" ] || {
+            echo "version drift: ctx.py has $code, README.md has $readme"
+            exit 1
+          }
       - name: Self-test
         run: python3 ctx.py selftest
       # Measurement comes before installation on purpose. Twice now the install
