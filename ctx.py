@@ -406,14 +406,11 @@ def build_context(files: list[Source], words: list[str], budget: int, expand: bo
             seen.add((source.path, start, end))
             add(f"{source.path}:{start + 1}-{end} (body)", numbered(source.text, start, end))
 
-    # Phase 2 — the map: signatures, so the model knows what else exists.
-    for _score, source in ranked:
-        block = "\n".join(outline(source))
-        if block:
-            add(source.path, block)
-
-    # Phase 3 — blocks in files that matched but were not the top three.
-    for _score, source in ranked[3:]:
+    # Phase 2 — blocks from the next-ranked matches, BEFORE any map. An outline
+    # tells you a name exists; a body answers the question. When the budget is
+    # finite, the body of the tenth-ranked file is worth more than the outline of
+    # the hundredth, so bodies come first all the way down.
+    for _score, source in ranked[3:10]:
         pieces: list[str] = []
         for hit in best_hit_lines(source, words, 1):
             start, end = enclosing_block(source.text, hit)
@@ -423,6 +420,12 @@ def build_context(files: list[Source], words: list[str], budget: int, expand: bo
             pieces.append(numbered(source.text, start, end))
         if pieces:
             add(f"{source.path} (excerpt)", "\n".join(pieces))
+
+    # Phase 3 — the map: signatures, so the model knows what else exists.
+    for _score, source in ranked:
+        block = "\n".join(outline(source))
+        if block:
+            add(source.path, block)
 
     # Phase 4 — one hop out: what the top file imports. Often where the
     # definition lives, and cheap because it is outlines only.
