@@ -48,7 +48,7 @@ TEXT_EXT = {
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "2.16.0"
+__version__ = "2.17.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -410,6 +410,21 @@ def call_sites(
     return found
 
 
+SMALL_FILE_LINES = 60
+
+
+def emit_range(source: Source, hit: int) -> tuple[int, int]:
+    """Whole file when it is short, otherwise the block containing the hit.
+
+    A 40-line file costs little more than one of its functions and contains
+    everything else in it, so one hit line can no longer hide the answer in a
+    sibling function.
+    """
+    if len(source.lines) <= SMALL_FILE_LINES:
+        return 0, len(source.lines)
+    return enclosing_block(source.text, hit)
+
+
 def build_context(
     files: list[Source],
     words: list[str],
@@ -444,7 +459,7 @@ def build_context(
     # Phase 1 — the answer itself: the enclosing block of the best matches.
     for _score, source in ranked[:3]:
         for hit in best_hit_lines(source, words):
-            start, end = enclosing_block(source.text, hit)
+            start, end = emit_range(source, hit)
             if (source.path, start, end) in seen:
                 continue
             seen.add((source.path, start, end))
@@ -456,12 +471,15 @@ def build_context(
     # unspent while an arbitrary rank-10 cut ended the bodies. The ranking already
     # found every file; the emission was refusing to use it.
     reserve = int(budget * 0.15)
-    for _score, source in ranked[3:]:
+    for position, (_score, source) in enumerate(ranked[3:], start=4):
         if used > budget - reserve:
             break
         pieces: list[str] = []
-        for hit in best_hit_lines(source, words, 1):
-            start, end = enclosing_block(source.text, hit)
+        # Deeper into the ranking, one block per file; near the top, two, because a
+        # needle in a second function of a top file was escaping on 7 of 25 misses.
+        per_file = 2 if position <= 10 else 1
+        for hit in best_hit_lines(source, words, per_file):
+            start, end = emit_range(source, hit)
             if (source.path, start, end) in seen:
                 continue
             seen.add((source.path, start, end))
