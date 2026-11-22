@@ -128,3 +128,5 @@ jobs:
           python3 ctx.py bench corpus --queries 100
           echo "--- hard mode: needles that exist in exactly one file ---"
           python3 ctx.py bench corpus --queries 100 --rare 1
+          echo "--- where the misses come from ---"
+          python3 ctx.py bench corpus --queries 100 --rare 1 --diagnose

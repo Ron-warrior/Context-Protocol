@@ -799,6 +799,36 @@ def cmd_bench(args) -> int:
         if ai[0] <= ln[0] and ai[1] >= ln[1]:
             print("lean wins on both -- intelligence-first is paying for nothing here")
 
+    if getattr(args, "diagnose", False):
+        # Where do the misses come from? A needle whose file was never ranked is a
+        # ranking problem; one whose file ranked but whose content never reached
+        # the context is a budget or phase-order problem. Different fixes, so they
+        # are counted apart instead of guessed at.
+        missed = 0
+        not_ranked = 0
+        not_emitted = 0
+        missing_file = 0
+        for query in queries:
+            needles = query["needles"]
+            words = words_of(needles[0])
+            context, _used = intelligence(words)
+            if recall_of(context, needles) >= 1.0:
+                continue
+            missed += 1
+            holders = [s.path for s in files if needles[0] in s.text]
+            if not holders:
+                missing_file += 1
+                continue
+            ranked_paths = {source.path for _score, source in rank(files, words)}
+            if not any(path in ranked_paths for path in holders):
+                not_ranked += 1
+            else:
+                not_emitted += 1
+        print(
+            f"\ndiagnose: {missed} misses -- never ranked: {not_ranked}, "
+            f"ranked but not emitted: {not_emitted}, absent from corpus: {missing_file}"
+        )
+
     if getattr(args, "json", False):
         print(json.dumps({
             "corpus": args.path,
@@ -980,6 +1010,10 @@ def main(argv: list[str] | None = None) -> int:
     p_bench.add_argument(
         "--rare", type=int, default=2,
         help="needles appear in at most this many files; 1 is the hard case",
+    )
+    p_bench.add_argument(
+        "--diagnose", action="store_true",
+        help="classify the misses: never ranked vs ranked but not emitted",
     )
     p_bench.add_argument("--json", action="store_true", help="machine-readable results")
     p_bench.set_defaults(func=cmd_bench)
