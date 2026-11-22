@@ -48,7 +48,7 @@ TEXT_EXT = {
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "2.12.0"
+__version__ = "2.14.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -438,11 +438,15 @@ def build_context(
             seen.add((source.path, start, end))
             add(f"{source.path}:{start + 1}-{end} (body)", numbered(source.text, start, end))
 
-    # Phase 2 — blocks from the next-ranked matches, BEFORE any map. An outline
-    # tells you a name exists; a body answers the question. When the budget is
-    # finite, the body of the tenth-ranked file is worth more than the outline of
-    # the hundredth, so bodies come first all the way down.
-    for _score, source in ranked[3:10]:
+    # Phase 2 — blocks from every other ranked match, BEFORE any map, spending the
+    # budget rather than stopping at an arbitrary rank. Diagnosis was unambiguous:
+    # 29 of 29 misses were "ranked but not emitted", with 30% of the budget left
+    # unspent while an arbitrary rank-10 cut ended the bodies. The ranking already
+    # found every file; the emission was refusing to use it.
+    reserve = int(budget * 0.15)
+    for _score, source in ranked[3:]:
+        if used > budget - reserve:
+            break
         pieces: list[str] = []
         for hit in best_hit_lines(source, words, 1):
             start, end = enclosing_block(source.text, hit)
