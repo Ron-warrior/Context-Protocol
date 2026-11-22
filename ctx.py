@@ -48,7 +48,7 @@ TEXT_EXT = {
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "2.14.0"
+__version__ = "2.15.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -812,6 +812,7 @@ def cmd_bench(args) -> int:
         not_ranked = 0
         not_emitted = 0
         missing_file = 0
+        positions: list[int] = []
         for query in queries:
             needles = query["needles"]
             words = words_of(needles[0])
@@ -823,14 +824,28 @@ def cmd_bench(args) -> int:
             if not holders:
                 missing_file += 1
                 continue
-            ranked_paths = {source.path for _score, source in rank(files, words)}
-            if not any(path in ranked_paths for path in holders):
+            ranked_list = [source.path for _score, source in rank(files, words)]
+            ranked_paths = set(ranked_list)
+            hit = [path for path in holders if path in ranked_paths]
+            if not hit:
                 not_ranked += 1
             else:
                 not_emitted += 1
+                # Which rank did the file holding the answer sit at? A file inside
+                # the top ranks that still never surfaced is a phase bug, not a
+                # budget one, and the two need opposite fixes.
+                positions.append(min(ranked_list.index(path) for path in hit) + 1)
+        detail = ""
+        if positions:
+            positions.sort()
+            inside = sum(1 for p in positions if p <= 10)
+            detail = (
+                f" (rank of the missed file: median {positions[len(positions) // 2]}, "
+                f"within top 10: {inside}/{len(positions)})"
+            )
         print(
             f"\ndiagnose: {missed} misses -- never ranked: {not_ranked}, "
-            f"ranked but not emitted: {not_emitted}, absent from corpus: {missing_file}"
+            f"ranked but not emitted: {not_emitted}, absent from corpus: {missing_file}{detail}"
         )
 
     if getattr(args, "json", False):

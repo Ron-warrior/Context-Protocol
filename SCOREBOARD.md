@@ -213,8 +213,28 @@ Corpus: freellmapi, 795 files, **100 queries**, budget 4000 tokens. Real emissio
 | --- | --- | --- | --- |
 | grep | 1.000 | 704,380 | 92/100 |
 | read_all | 1.000 | 1,960,580 | 100/100 |
-| **intelligence** | **0.720** | **2,738** | – |
+| **intelligence** | **0.750** | **2,748** | – |
 | lean | 0.650 | 2,503 | – |
+
+### The fix that moved it
+
+2.14.0 replaced the arbitrary rank-10 cut with "keep emitting bodies until 85% of
+the budget is spent". Measured effect on the same 100 hard queries:
+
+| | before 2.14.0 | after |
+| --- | --- | --- |
+| normal | 0.720 | **0.790** |
+| hard | 0.710 | **0.750** |
+| margin over lean | +0.08 / +0.07 | **+0.150 / +0.100** |
+
+The diagnosis was "29 of 29 misses were ranked but not emitted, with 30% of the
+budget unspent". The fix used the budget. Recall rose by 7 points; the margin over
+the token-first baseline more than doubled. That is the loop working as designed:
+measure where the failure is, fix that, measure again.
+
+25 misses remain, still all "ranked but not emitted", so budget was not the whole
+story — 2.15.0's diagnose reports the *rank position* of each missed file to
+separate a phase bug from a cutoff.
 
 ### What this settles
 
