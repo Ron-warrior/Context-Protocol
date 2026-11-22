@@ -196,45 +196,46 @@ justify one. A protocol bump needs a rule that changed.
 
 ## Product numbers (`ctx`, not the research harness)
 
-Corpus: freellmapi, 795 files, **100 queries**, budget 4000 tokens. Real emission.
+Corpus: freellmapi, 795 files, **100 queries**, budget 4000 tokens. Real emission,
+not `min(emitted, budget)`.
 
-**Normal** — needles that appear in at most two files:
+### Current — measured at 2.18.0
 
-| policy | recall | tokens | over budget | ms |
-| --- | --- | --- | --- | --- |
-| read_all | 1.000 | 1,960,580 | 100/100 | 59.6 |
-| grep | 0.990 | 736,338 | 95/100 | 75.1 |
-| **intelligence** | **0.720** | **2,876** | – | 78.4 |
-| lean (`--lean`) | 0.640 | 2,621 | – | 113.1 |
+| policy | normal recall | normal tokens | hard recall | hard tokens | ms |
+| --- | --- | --- | --- | --- | --- |
+| **intelligence** | **0.880** | **2,903** | **0.900** | **2,748** | 79 |
+| lean (`--lean`) | 0.740 | 2,620 | 0.770 | 2,503 | 106 |
+| grep | 0.990 | 736,338 | 1.000 | 704,380 | 75 |
+| read_all | 1.000 | 1,960,580 | 1.000 | 1,960,580 | 64 |
 
-**Hard** — needles that exist in exactly one file, so there is no second chance:
+Margin over the token-first baseline: **+0.140 normal, +0.130 hard**, for 283 and
+244 extra tokens. `grep` and `read_all` reach 1.000 only by emitting 175x and 490x
+the budget — which is the accounting error this project exists to not make.
 
-| policy | recall | tokens | over budget |
+### How it got there
+
+| version | change | normal | hard |
 | --- | --- | --- | --- |
-| grep | 1.000 | 704,380 | 92/100 |
-| read_all | 1.000 | 1,960,580 | 100/100 |
-| **intelligence** | **0.750** | **2,748** | – |
-| lean | 0.650 | 2,503 | – |
+| 2.13.0 | arbitrary cut at rank 10 | 0.720 | 0.710 |
+| 2.14.0 | keep emitting bodies until 85% of the budget is spent | 0.790 | 0.750 |
+| 2.16.0 | exact-phrase boost in ranking | — | — |
+| 2.17.0 | small files emitted whole; two blocks per top-10 file | — | — |
+| 2.18.0 | no retrieval change — the measurement itself | **0.880** | **0.900** |
 
-### The fix that moved it
+2.16.0 and 2.17.0 have no row of their own because their runs were never read.
+Their combined effect is the 0.790 → 0.880 / 0.750 → 0.900 step, measured at the
+next run that was actually inspected. That gap is the reason 2.18.0 added a floor:
+a measurement nobody reads is not a measurement.
 
-2.14.0 replaced the arbitrary rank-10 cut with "keep emitting bodies until 85% of
-the budget is spent". Measured effect on the same 100 hard queries:
+### Where the misses went
 
-| | before 2.14.0 | after |
-| --- | --- | --- |
-| normal | 0.720 | **0.790** |
-| hard | 0.710 | **0.750** |
-| margin over lean | +0.08 / +0.07 | **+0.150 / +0.100** |
+At 2.14.0: 25 misses, all "ranked but not emitted", median **rank 40** — a budget
+and reach problem.
 
-The diagnosis was "29 of 29 misses were ranked but not emitted, with 30% of the
-budget unspent". The fix used the budget. Recall rose by 7 points; the margin over
-the token-first baseline more than doubled. That is the loop working as designed:
-measure where the failure is, fix that, measure again.
-
-25 misses remain, still all "ranked but not emitted", so budget was not the whole
-story — 2.15.0's diagnose reports the *rank position* of each missed file to
-separate a phase bug from a cutoff.
+At 2.18.0: **10 misses**, still all "ranked but not emitted", but median **rank 1**
+and 8 of 10 inside the top 10. The ranking now finds the right file almost every
+time; what is left is a *phase* problem — the file is included, and the needle's
+part of it is not. That is a different fix, and it is the next one.
 
 ### What this settles
 
@@ -265,18 +266,20 @@ cheaper policy and is probably noise on a shared runner. Noted, not acted on.
 
 ## 2.18.0 — the bench becomes a regression test
 
-Every number above was produced by a harness whose output nothing in the loop
-could read. Green jobs print to a run page; the iteration happens in a chat. So
-the measurement existed and the feedback did not.
+Every number above was produced by a harness whose output I never read. Green
+jobs print to a run page; I assumed the log was only available for failures and
+did not try. So the measurement existed and the feedback did not.
 
-`ctx bench --floor <recall>` closes that: recall below the floor exits 1 and
-prints the table and the shortfall on stderr, which *is* readable. CI runs the
-self-bench at 0.75 against a measured 0.790, and every bench table now also lands
-in the job summary.
+`ctx bench --floor <recall>` closes that regardless: recall below the floor exits
+1 and prints the table and the shortfall on stderr. CI runs the self-bench at
+0.75 and every bench table now also lands in the job summary. The floor earns its
+keep as a regression gate — recall cannot move down silently.
 
-Consequence for this file: a green CI run is now evidence of a floor, not of a
-number, and a red one is how a number arrives. Recall is no longer allowed to
-move down silently between versions.
+**Correction, the same day.** `github_checks action=logs` returns the full log of
+a *passed* job when given its `job_id`. I assumed otherwise from the tool
+description and never tested it until after this version shipped. Reading job
+137403206767 that way produced the 0.880 / 0.900 numbers above. The floor stands
+as a gate; the claim that green runs were unreadable does not.
 
 Two documentation stamps were found stale while wiring it — `pyproject.toml` at
 2.0.0 for 17 releases, `SKILL.md` describing the pre-2.14.0 emission order. Both

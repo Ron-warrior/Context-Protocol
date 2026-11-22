@@ -605,11 +605,9 @@ and proves nothing. This trace is about the reporting channel, not retrieval.
 
 **The failure.** `ctx bench` has printed a full table — recall, tokens, over
 budget, ms, per policy — since 2.15.0, and CI has run it five times per push on
-three corpora. None of those numbers ever reached the agent doing the iteration.
-`github_checks` shows the console log of a *failed* job only; a green job's output
-is visible to whoever opens the run page on GitHub, which is not the loop that
-decides the next version. So every green bench was, functionally, a bench that
-did not happen.
+three corpora. None of those numbers reached the agent doing the iteration,
+because I never fetched them. The floor was built on the belief that a passed
+job's log was unreadable; see the correction at the end of this entry.
 
 **How it surfaced.** Reading a green run's check list and noticing the only thing
 that could be learned from it was "passed". The numbers from 2.16.0 (phrase boost)
@@ -637,9 +635,29 @@ The version-drift check in CI compared only `ctx.py` and `README.md`, so a file
 that ships to PyPI could disagree with both and pass. It now compares every file
 that carries the number, exactly.
 
-**What is not claimed.** The recall effect of 2.16.0 and 2.17.0 is still unmeasured
-as of this entry. The floor is what makes the next reading possible; it is not a
-result. The 2.17.0 run was still executing when this was written.
+**What was not claimed at the time.** The recall effect of 2.16.0 and 2.17.0 was
+unmeasured when this entry was written. The floor was what made the next reading
+possible; it was never a result.
+
+**Correction, same day.** `github_checks action=logs` returns the console log of a
+**passed** job, given its `job_id` — the tool description says "a failed job's
+log", and I built the whole "no reader" diagnosis on that sentence without
+testing it. Reading job 137403206767 produced the numbers:
+
+| version | normal | hard |
+| --- | --- | --- |
+| 2.14.0 | 0.790 | 0.750 |
+| 2.18.0 | **0.880** | **0.900** |
+
+The phrase boost and the small-file/two-block emission were worth +0.090 and
++0.150. Meanwhile the diagnose moved from "25 misses at median rank 40" to
+"10 misses at median rank 1", which reverses the next step: reach was the problem
+at 2.14.0 and is not the problem now.
+
+So the version was right about the gate and wrong about the cause. The gate stays
+— recall must not regress silently — and the lesson is recorded rather than
+smoothed over: a tool description is not documentation of behaviour, and reading
+one is not testing it.
 
 
 
