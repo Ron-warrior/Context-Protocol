@@ -333,3 +333,27 @@ and three_strike may then challenge it on answers per 1k.
 Whether any strike rule beats until_found per token — the 1.11.0 run decides.
 And the ladder's margins are still measured on auto-generated rare-identifier
 queries; a synonym-tolerant query generator is the next instrument gap.
+
+
+## Trace: ablation — the last untested claim gets a losing mode
+
+While the 1.11.0 CI run was pending, the round implemented bench 1.12.0 rather
+than polling: `--ablate` runs the ladder with each rung-2 claim disabled —
+`definition_weight` off, `length_damping` off, and PageRank itself off, which
+is the aider repo-map claim in the crosshairs. The knobs have only ever been
+asserted to *change* the ranking (a self-test check since 1.6.0); whether they
+*improve* recall was never measured.
+
+Same queries, same budgets, apples to apples. Prediction recorded in SCOREBOARD
+before the run: if default ties every ablation on the real corpus, the rung-2
+knobs are decoration until shown otherwise — and a losing claim gets demoted,
+which is what the promotion rule is for.
+
+### Countable units, this round
+
+| Unit | this round |
+| --- | --- |
+| calls | ~10 |
+| authored | ~75 lines (bench, workflow, scoreboard, trace) |
+| read-back | the ablation block, the dispatch, the workflow steps |
+| executed | CI pending for 1.11.0 + 1.12.0 (one run covers both) |

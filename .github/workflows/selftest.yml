@@ -21,6 +21,7 @@ jobs:
           python3 eval/retrieval_bench.py . --auto 10
           python3 eval/retrieval_bench.py . --auto 10 --sweep 1000,4000
           python3 eval/retrieval_bench.py . --auto 10 --stop
+          python3 eval/retrieval_bench.py . --auto 10 --ablate
           python3 eval/retrieval_bench.py . --auto 10 --focus eval/retrieval_bench.py
 
 
@@ -49,3 +50,5 @@ jobs:
         run: python3 eval/retrieval_bench.py corpus --auto 25 --sweep 1000,4000,16000
       - name: Stop rules on a real repository
         run: python3 eval/retrieval_bench.py corpus --auto 25 --stop
+      - name: Rung-2 ablation on a real repository
+        run: python3 eval/retrieval_bench.py corpus --auto 25 --ablate

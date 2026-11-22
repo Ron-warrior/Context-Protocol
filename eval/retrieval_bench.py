@@ -35,6 +35,7 @@ Usage
     python3 eval/retrieval_bench.py . --sweep 1000,4000,16000
     python3 eval/retrieval_bench.py . --focus src/app.py
     python3 eval/retrieval_bench.py . --stop
+    python3 eval/retrieval_bench.py . --ablate
     python3 eval/retrieval_bench.py --selftest
 
 Queries file:
@@ -739,6 +740,80 @@ def report_sweep(
     return 0
 
 
+ABLATIONS: dict[str, tuple[Ranking, bool]] = {
+    # (ranking, apply pagerank). Each entry is a rung-2 claim set to "off" so
+    # the claim can lose rather than be assumed: the knobs were asserted to
+    # change the ranking, never to improve recall, until this mode existed.
+    "default": (Ranking(), True),
+    "definition_weight_off": (Ranking(definition_weight=1.0), True),
+    "length_damping_off": (Ranking(length_damping=0.0), True),
+    "pagerank_off": (Ranking(), False),
+}
+
+
+def report_ablate(
+    corpus: Corpus,
+    queries: list[dict],
+    budgets: list[int],
+    as_json: bool,
+) -> int:
+    """The ladder at default knobs vs each rung-2 claim disabled.
+
+    A knob that never moves recall per 1k is decoration, whatever it does to
+    the ranking itself. The same queries answer the same questions under every
+    variant, so the comparison is apples to apples. --focus is ignored here:
+    focus is a per-task input, not a standing claim.
+    """
+    table: dict[int, dict[str, dict]] = {}
+    for budget in budgets:
+        row: dict[str, dict] = {}
+        for name, (rank, apply_pagerank) in ABLATIONS.items():
+            total_recall = 0.0
+            total_tokens = 0
+            for query in queries:
+                keywords = keywords_for(query)
+                prior = personalize(corpus, keywords, rank)
+                ranked = pagerank(corpus, prior) if apply_pagerank else prior
+                context, used = assemble(
+                    chunks_ladder(corpus, ranked, keywords, budget), budget
+                )
+                total_recall += recall_of(context, query.get("needles", []))
+                total_tokens += used
+            count = len(queries) or 1
+            mean_recall = total_recall / count
+            mean_tokens = total_tokens / count
+            row[name] = {
+                "recall": mean_recall,
+                "tokens": mean_tokens,
+                "recall_per_1k": (mean_recall / (mean_tokens / 1000.0)) if mean_tokens else 0.0,
+            }
+        table[budget] = row
+
+    if as_json:
+        print(json.dumps({str(budget): item for budget, item in table.items()}, indent=2))
+        return 0
+
+    print(f"corpus: {len(corpus.files)} files  queries: {len(queries)}\n")
+    print("ladder recall per 1k tokens, each rung-2 claim disabled\n")
+    print("| ladder variant | " + " | ".join(str(b) for b in budgets) + " |")
+    print("| --- |" + " --- |" * len(budgets))
+    for name in table[budgets[0]]:
+        cells = " | ".join(f"{table[budget][name]['recall_per_1k']:.3f}" for budget in budgets)
+        print(f"| {name} | {cells} |")
+    print()
+    winners = {
+        max(table[budget].items(), key=lambda item: item[1]["recall_per_1k"])[0]
+        for budget in budgets
+    }
+    if winners == {"default"}:
+        print("default knobs win at every budget -- the claims are earning their keep")
+    elif "default" in winners:
+        print("default ties with an ablation at some budget -- the margin is thin")
+    else:
+        print(f"an ablation beats default: {', '.join(sorted(winners))} -- a rung-2 claim is losing")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="Benchmark context-selection policies.")
     parser.add_argument("root", nargs="?", default=".", help="repository to scan")
@@ -755,6 +830,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--sweep",
         help="comma-separated budgets, e.g. 1000,4000,16000: the winner per budget",
+    )
+    parser.add_argument(
+        "--ablate",
+        action="store_true",
+        help="run the ladder with each rung-2 knob disabled; the claims can lose",
     )
     parser.add_argument(
         "--focus",
@@ -802,6 +882,9 @@ def main(argv: list[str]) -> int:
     if not queries:
         print("no queries: pass --queries or use a corpus with distinctive identifiers", file=sys.stderr)
         return 1
+
+    if args.ablate:
+        return report_ablate(corpus, queries, budgets, args.json)
 
     rank = Ranking(focus=args.focus)
     if args.focus and resolve_focus(corpus, args.focus) is None:
