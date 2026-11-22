@@ -66,14 +66,15 @@ ctx plan                             # the ladder as a checklist, no install nee
 ctx selftest                         # fixtures; exit 0 means it works
 ```
 
-`ctx query` emits, in this order: the enclosing body of each of the top three
-matches, then two blocks per file down to rank 10 and a nine-line window centered
-on the best hit after that — until 85% of the budget is spent — then a signature
-map of every ranked file, then one hop of imports, then call sites of what it
-found. Bodies before maps, because an outline tells you a name exists while a body
-answers the question. Deep ranks get windows rather than whole bodies because the
-constraint down there is reach, not detail. It never reads a file it has no reason
-to read, and `.gitignore` plus `.ctxrc` (`budget=`, `expand=off`) are honoured.
+`ctx query` emits, in this order: up to four enclosing blocks of the best-ranked
+file and three each for the next two, then three blocks per file down to rank 10
+and one each after that — until 85% of the budget is spent — then a signature map
+of every ranked file, then one hop of imports, then call sites of what it found.
+Blocks before maps, because an outline tells you a name exists while a body
+answers the question. Near the top the budget buys coverage of the file rather
+than another file: at 2.18.0, 8 of the 10 remaining misses were inside the top 10.
+It never reads a file it has no reason to read, and `.gitignore` plus `.ctxrc`
+(`budget=`, `expand=off`) are honoured.
 
 ## Mode 3 — measure before you trust
 

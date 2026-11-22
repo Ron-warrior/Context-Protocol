@@ -688,5 +688,47 @@ function of a deep file escapes, and that is what the measurement is for.
 measured at 2.15.0 and hard recall above 0.750, at similar token cost. If it does
 not, the window is too tight and the radius is the knob — not the idea.
 
-**Measured result.** Pending CI. The 2.18.0 floor (0.75 on this repository, 100
-queries, budget 4000) is what turns this into a pass or a number.
+**Measured result — and the revert.** 0.880 normal, 0.900 hard, 2,904 and 2,752
+tokens. That is *identical* recall to 2.18.0 (0.880 / 0.900) with tokens within
+noise (+1 and +4). The change bought nothing, because by 2.18.0 the misses were no
+longer at rank 40 — they were at rank 1. The evidence that justified 2.19.0 had
+already been made obsolete by the fix two versions earlier, and I built on the
+diagnose from 2.14.0 without re-reading the current one.
+
+Reverted in 2.20.0. The trace stays because a version that measured zero is
+better evidence than a version that was never run.
+
+
+
+## Trace: 2.20.0 — the budget was never the constraint
+
+**What the 2.18.0 numbers actually said.** Normal recall 0.880, hard 0.900, and
+the policy spent **2,903 of its 4,000 tokens**. The 10 remaining misses were
+"ranked but not emitted" at a **median rank of 1**, 8 of 10 inside the top 10.
+
+Both halves matter:
+
+- The file holding the answer is almost always the file ranked first. Ranking is
+  no longer the problem.
+- The policy leaves ~1,100 tokens unspent. Phase 2 stops because it runs out of
+  *files that matched a query word*, not because it runs out of budget.
+
+So the ceiling is neither reach nor ranking. It is **coverage of the one file that
+matters**: two blocks per file is a guess at which part of a 200-line file holds
+the needle, and on 10 of 100 queries that guess was wrong while the budget sat
+unused.
+
+**The change.** Phase 1 covers the top file with up to four enclosing blocks and
+the next two with three each (was two for all three). Phase 2 emits three blocks
+per file down to rank 10 (was two). Deep ranks are unchanged.
+
+**The arithmetic of the trade.** The extra two blocks are the cheapest tokens in
+the policy: they are in the file already ranked first, and they are paid for out
+of headroom that was measurably idle. Under the stated objective — intelligence,
+then tokens, then speed — spending idle budget to cover the top file is not a
+trade at all.
+
+**Prediction, recorded before the run.** Normal recall > 0.880 and hard > 0.900,
+tokens rising toward 3,200–3,600 but staying under the 4,000 budget. If recall
+does not move, then two blocks were not the reason for those misses either, and
+the next suspect is the *block boundary* rule rather than the block count.

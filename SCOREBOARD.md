@@ -292,17 +292,29 @@ result.
 
 
 
-## 2.19.0 — nine-line windows below rank 10
+## 2.19.0 — nine-line windows below rank 10 (reverted)
 
-Diagnosis: every remaining miss is "ranked but not emitted", median rank 40.
-Emission, not ranking, was the ceiling. Ranks 11+ now get a nine-line window
-centered on the best hit instead of a full enclosing body, so the same budget
-reaches two to three times deeper. Ranks 1–10 keep whole bodies.
+Predicted, on 2.14.0's diagnose, that emission could not reach the missed answers
+at median rank 40. Ranks 11+ got a nine-line window instead of a full body.
 
-Prediction recorded before measuring: normal recall above 0.790, hard above 0.750,
-tokens roughly flat. Measured result pending CI — the 2.18.0 floor turns the run
-into either a pass or a printed number.
+**Measured: 0.880 normal, 0.900 hard, 2,904 and 2,752 tokens — identical recall
+to 2.18.0, tokens within noise.** The premise was stale: by 2.18.0 the median
+missed rank was **1**, not 40. Reverted in 2.20.0.
+
+The lesson is about which diagnosis an iteration is built on. 2.14.0's number was
+correct when it was written and had been obsolete for two versions before I reused
+it. A diagnosis is evidence with a timestamp, not a standing fact.
 
 Also in this version: CI now executes the install command the README tells people
 to use (`pip install "git+https://github.com/<repo>.git@<sha>"`) from outside the
 checkout, so the public path a stranger takes is the one that gets tested.
+
+## 2.20.0 — cover the top file, not more files
+
+At 2.18.0 the policy spent 2,903 of 4,000 tokens, and its 10 misses sat at median
+rank **1**. Neither budget nor ranking was binding; coverage of the right file was.
+
+Ranks 1–3 now get four, three and three enclosing blocks; ranks 4–10 get three.
+Prediction recorded before measuring: normal recall above 0.880, hard above 0.900,
+tokens rising to 3,200–3,600 and staying inside the budget.
+
