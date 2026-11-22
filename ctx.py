@@ -48,7 +48,7 @@ TEXT_EXT = {
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "2.18.0"
+__version__ = "2.19.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -425,6 +425,19 @@ def emit_range(source: Source, hit: int) -> tuple[int, int]:
     return enclosing_block(source.text, hit)
 
 
+def tight_range(source: Source, hit: int, radius: int = 4) -> tuple[int, int]:
+    """A small window centered on the hit, for ranks the budget can barely reach.
+
+    Deep in the ranking the binding constraint is reach, not detail: diagnosis put
+    the median missed answer at rank 40 while every full body spent three to four
+    times what a centered window costs. Nine lines instead of a forty-line body
+    buys roughly four times the depth for the same tokens.
+    """
+    start = max(0, hit - radius)
+    end = min(len(source.lines), hit + radius + 1)
+    return start, end
+
+
 def build_context(
     files: list[Source],
     words: list[str],
@@ -479,7 +492,10 @@ def build_context(
         # needle in a second function of a top file was escaping on 7 of 25 misses.
         per_file = 2 if position <= 10 else 1
         for hit in best_hit_lines(source, words, per_file):
-            start, end = emit_range(source, hit)
+            if position <= 10:
+                start, end = emit_range(source, hit)
+            else:
+                start, end = tight_range(source, hit)
             if (source.path, start, end) in seen:
                 continue
             seen.add((source.path, start, end))
@@ -996,6 +1012,16 @@ def cmd_selftest(_args) -> int:
         assert lo <= deep < hi, f"hit at {deep} fell outside block {lo}-{hi}"
         assert hi - lo <= MAX_BODY_LINES, "block must respect the cap"
         checks += 2
+
+        # Deep ranks trade detail for reach. The window must still contain the hit,
+        # must stay small, and must not run off either end of the file.
+        lo, hi = tight_range(long_body, deep)
+        assert lo <= deep < hi, f"tight window {lo}-{hi} lost the hit at {deep}"
+        # A hit near the end of the file clamps, so measure the width mid-file.
+        mid_lo, mid_hi = tight_range(long_body, 100)
+        assert mid_hi - mid_lo == 9, "the tight window is nine lines"
+        assert tight_range(long_body, 0) == (0, 5), "a hit at the top cannot start below 0"
+        checks += 3
 
         body, used, chunks = build_context(files, ["refresh", "token"], 4000)
         assert "refresh_token" in body, "the context must surface the needle"

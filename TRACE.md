@@ -640,3 +640,35 @@ that carries the number, exactly.
 **What is not claimed.** The recall effect of 2.16.0 and 2.17.0 is still unmeasured
 as of this entry. The floor is what makes the next reading possible; it is not a
 result. The 2.17.0 run was still executing when this was written.
+
+
+
+## Trace: 2.19.0 — reach instead of detail below rank 10
+
+**The evidence.** 2.15.0's diagnose said the remaining misses were all "ranked but
+not emitted", with the missed file at a **median rank of 40** and only 7 of 25
+inside the top 10. The ranking had found every answer; the emission could not
+reach them.
+
+**The arithmetic.** Phase 2 spends bodies in rank order until 85% of the budget is
+gone. A 795-file corpus at 4,000 tokens reaches roughly rank 20 when each deep
+file costs a full enclosing body — a 30-to-50-line block, 100–200 tokens. The
+answer at rank 40 is behind 20 files the budget never gets to.
+
+**The change.** Ranks 11 and deeper get a nine-line window centered on the best
+hit line, instead of the enclosing body. That is roughly a third of the cost per
+file, so the same tokens reach two to three times deeper into the ranking. Ranks
+1–10 are untouched: they still get whole bodies, two per file.
+
+**Why the window still contains the needle.** `best_hit_lines` returns the line
+matching the most query words, and a bench needle is by construction a line full
+of the query's rare words. So the window is centered on the line most likely to
+be the answer. This is a correlation, not a guarantee — a needle in a second
+function of a deep file escapes, and that is what the measurement is for.
+
+**Prediction, recorded before the run.** Normal recall rises above the 0.790
+measured at 2.15.0 and hard recall above 0.750, at similar token cost. If it does
+not, the window is too tight and the radius is the knob — not the idea.
+
+**Measured result.** Pending CI. The 2.18.0 floor (0.75 on this repository, 100
+queries, budget 4000) is what turns this into a pass or a number.

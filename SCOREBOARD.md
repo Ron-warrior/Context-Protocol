@@ -286,3 +286,20 @@ version.
 **Unmeasured as of this entry:** the recall effect of 2.16.0 and 2.17.0. The floor
 was added precisely because those two versions were shipped without a readable
 result.
+
+
+
+## 2.19.0 — nine-line windows below rank 10
+
+Diagnosis: every remaining miss is "ranked but not emitted", median rank 40.
+Emission, not ranking, was the ceiling. Ranks 11+ now get a nine-line window
+centered on the best hit instead of a full enclosing body, so the same budget
+reaches two to three times deeper. Ranks 1–10 keep whole bodies.
+
+Prediction recorded before measuring: normal recall above 0.790, hard above 0.750,
+tokens roughly flat. Measured result pending CI — the 2.18.0 floor turns the run
+into either a pass or a printed number.
+
+Also in this version: CI now executes the install command the README tells people
+to use (`pip install "git+https://github.com/<repo>.git@<sha>"`) from outside the
+checkout, so the public path a stranger takes is the one that gets tested.

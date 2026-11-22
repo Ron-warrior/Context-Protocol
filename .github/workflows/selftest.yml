@@ -146,6 +146,22 @@ jobs:
           which ctx
           ctx selftest
           ctx map . | head -n 5
+      - name: Install from the public URL the README tells people to use
+        run: |
+          set -euxo pipefail
+          # README tells anyone to run `pipx install git+https://github.com/
+          # Ron-warrior/Context-Protocol`. Until the repository went public that
+          # command could not work at all, so the claim had never executed once.
+          # A git install builds the same pyproject a stranger gets, so this is
+          # the stranger's path, not the local one.
+          python3 -m venv .venv-git
+          source .venv-git/bin/activate
+          pip install --quiet "git+https://github.com/${GITHUB_REPOSITORY}.git@${GITHUB_SHA}"
+          # Leave the checkout: otherwise `ctx` could resolve to ./ctx.py on the
+          # import path and prove nothing about the installed package.
+          cd /tmp
+          ctx --version
+          ctx selftest
       - name: Check out a real corpus
         uses: actions/checkout@v4
         with:

@@ -67,12 +67,13 @@ ctx selftest                         # fixtures; exit 0 means it works
 ```
 
 `ctx query` emits, in this order: the enclosing body of each of the top three
-matches, then bodies from every other ranked file — two blocks per file down to
-rank 10, one block each after that — until 85% of the budget is spent, then a
-signature map of every ranked file, then one hop of imports, then call sites of
-what it found. Bodies before maps, because an outline tells you a name exists
-while a body answers the question. It never reads a file it has no reason to
-read, and `.gitignore` plus `.ctxrc` (`budget=`, `expand=off`) are honoured.
+matches, then two blocks per file down to rank 10 and a nine-line window centered
+on the best hit after that — until 85% of the budget is spent — then a signature
+map of every ranked file, then one hop of imports, then call sites of what it
+found. Bodies before maps, because an outline tells you a name exists while a body
+answers the question. Deep ranks get windows rather than whole bodies because the
+constraint down there is reach, not detail. It never reads a file it has no reason
+to read, and `.gitignore` plus `.ctxrc` (`budget=`, `expand=off`) are honoured.
 
 ## Mode 3 — measure before you trust
 
