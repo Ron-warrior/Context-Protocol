@@ -65,6 +65,18 @@ DEF_RE = re.compile(
     r"|const|record|module|namespace|object)\s+([A-Za-z_$][\w$]*)"
 )
 IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+# TypeScript and modern JS declare most functions as `const name = ...`, which
+# DEF_RE does not see. Without this, enclosing blocks and call-site expansion
+# skip the dominant form in the corpus we test against.
+CONST_RE = re.compile(r"^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=")
+
+
+def declaration_name(line: str) -> str | None:
+    """The name this line declares, if any: class/def/func… or const name =."""
+    match = DEF_RE.match(line) or CONST_RE.match(line)
+    return match.group(1) if match else None
+
+
 SPLIT_RE = re.compile(r"[_\W]+|(?<=[a-z])(?=[A-Z])")
 IMPORT_RES = (
     re.compile(r"^\s*import\s+([\w.]+)", re.MULTILINE),
@@ -225,7 +237,7 @@ def related(source: Source, index: dict[str, str]) -> list[str]:
 def outline(source: Source) -> list[str]:
     lines: list[str] = []
     for number, line in enumerate(source.lines, start=1):
-        if DEF_RE.match(line):
+        if declaration_name(line):
             lines.append(f"{number}: {line.strip()[:120]}")
             if len(lines) >= MAX_OUTLINE_LINES:
                 break
@@ -269,7 +281,7 @@ def enclosing_block(text: str, hit: int) -> tuple[int, int]:
     lines = text.splitlines()
     start = None
     for index in range(min(hit, len(lines) - 1), -1, -1):
-        if DEF_RE.match(lines[index]):
+        if declaration_name(lines[index]):
             start = index
             break
     if start is None:
@@ -326,13 +338,13 @@ def declared_symbols(source: Source, limit: int = 6) -> list[str]:
     Longest first because `refresh_token` is a better search key than `get`.
     """
     names: list[str] = []
-    for line in source.text.splitlines():
-        match = DEF_RE.match(line)
-        if not match:
+    for line in source.lines:
+        name = declaration_name(line)
+        if not name:
             continue
-        name = match.group(1).lower()
-        if len(name) > 3 and name not in names:
-            names.append(name)
+        lowered = name.lower()
+        if len(lowered) > 3 and lowered not in names:
+            names.append(lowered)
     names.sort(key=len, reverse=True)
     return names[:limit]
 
@@ -739,6 +751,11 @@ def cmd_selftest(_args) -> int:
     assert split_identifier("refreshToken") == ["refresh", "token"], "camelCase split"
     assert split_identifier("refresh_token") == ["refresh", "token"], "snake_case split"
     checks += 2
+
+    assert declaration_name("const handler = async () => {}") == "handler", "const declaration"
+    assert declaration_name("function go() {}") == "go", "function declaration"
+    assert declaration_name("  const MAX = 10") == "MAX", "const constant"
+    checks += 3
 
     assert stem("errors") == "error", "plural stem"
     assert stem("handled") == "handl", "past-tense stem"
