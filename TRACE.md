@@ -508,3 +508,23 @@ prints whether intelligence-first actually beats `lean` on recall — but no num
 from that run is in this file yet. Ten of the twenty iterations were justified by
 reasoning about what should help, not by a measurement showing it did. That is the
 honest split, and it is why the bench delta exists.
+
+
+## Trace: the measurement was gated behind the thing that kept breaking
+
+Three consecutive `ctx` runs failed before the benchmark step: first a wrong
+assertion, then a venv scan, then a broken pipe on `| head`. Each failure was
+real and each got fixed — but because `bench` sat *after* `install` in the job,
+none of those runs produced a single number. The tool was being debugged without
+the instrument that says whether it works.
+
+Reordered. `ctx bench` now runs directly after the self-test, before the console
+script is installed. A cleaner install can never again be the precondition for
+learning whether intelligence-first beats `lean`.
+
+That ordering was my own, and it is the same class of mistake as answering from a
+README: both let a proxy stand between the question and its evidence.
+
+**Time note.** No clock is available in this environment, so elapsed time cannot be
+measured or waited on; work proceeds in rounds. The date recorded by git at this
+point is 2026-11-22.
