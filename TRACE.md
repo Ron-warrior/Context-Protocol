@@ -212,3 +212,33 @@ was violated in exactly the way the 1.1.0 rule was written to prevent.
 Fixed, and read back again. The defect count for the round is therefore 5, not 4,
 and the lesson is narrower than "read more": **a read is only a check if it is the
 last operation on the region.** Any edit after the read reopens the region.
+
+
+## Trace: execution — the step that caught what reading did not
+
+CI run 45064682765, the first execution of the harness.
+
+| Step | Result |
+| --- | --- |
+| `py_compile` | passed |
+| `--selftest` | passed |
+| `--ignore` | passed |
+| `--sweep` | passed, produced the first real metrics |
+| `--stop` | **crashed** — `NameError: name 'queries' is not defined` |
+
+The defect is instructive. `report_stop` printed `len(queries)` while its
+signature took `prepared`. That line had already been **read back** in an earlier
+version's verification pass — it sat inside a region I read and signed off.
+
+So the lesson is narrower and worse than "read-back sometimes misses things":
+
+> **Reading a line is not checking a line.** Coverage measures tokens spent, not
+> correctness. A compiler is a checker; my eyes are not.
+
+This is the third defect in this project that one execution would have caught
+instantly, and the first that survived an explicit read-back. It is the evidence
+for rung 6(c): if the project can run, run it.
+
+The cost of the miss was one CI run and one round of fixes. The cost without CI
+would have been every user invocation of `--stop`, since the crash was on the
+report path rather than in the computation.

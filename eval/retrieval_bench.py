@@ -550,7 +550,8 @@ def run_stop(
         results[rule] = {
             "answer_rate": rate,
             "tokens": mean_tokens,
-            "tokens_per_answer": (mean_tokens / rate) if rate else 0.0,
+            # inf, not 0: a rule that answers nothing must not look cheap
+            "tokens_per_answer": (mean_tokens / rate) if rate else float("inf"),
             "answer_per_1k": (rate / (mean_tokens / 1000.0)) if mean_tokens else 0.0,
         }
     return results
@@ -566,7 +567,7 @@ def report_stop(
     if as_json:
         print(json.dumps(results, indent=2))
         return 0
-    print(f"files: {len(corpus.files)}  queries: {len(queries)}  budget: {budget} tokens\n")
+    print(f"files: {len(corpus.files)}  queries: {len(prepared)}  budget: {budget} tokens\n")
     print("| stop rule | answer rate | tokens | tokens/answer |")
     print("| --- | --- | --- | --- |")
     for name, metrics in results.items():

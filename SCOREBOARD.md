@@ -47,6 +47,34 @@ Policies compared, in one pass, at the same budget:
 | 1.6.0 | Rung 2 implemented: `Ranking` knobs for focus, definition-over-usage and length damping, each a flag so it can lose; whole-token matching replaces substring matching in recall and in stop-rule answers; five new self-test assertions (17 total) | Re-reading the bench against rung 2 found all three ranking clauses were **not implemented** — every occurrence weighed the same. Substring matching credited `refresh_token` inside `refresh_token_legacy` in every policy alike | Kept |
 | 1.7.0 | `--sweep 1000,4000,16000`: recall per 1k at several budgets, and whether the winner holds | One budget is one point. A policy that wins at 4k can lose at 16k, and the protocol's budget-cap rule is only justified if the ranking holds across the cap | Kept |
 | 1.8.0 | Bench: `run_stop` unpacked a 2-tuple from the 3-tuple `prepare` now returns (would have crashed `--stop`); `--queries` load errors reported cleanly; `--sweep` and `--focus` validated in `main` | Read-back of the 1.6.0 region after the edit found the crash. Caller sweep then covered every changed signature | Kept |
+| 1.9.0 | `report_stop` printed an undefined `queries` (crash on `--stop`); `tokens_per_answer` reports `inf` instead of a flattering `0` when a rule answers nothing; CI workflow compiles, self-tests and smoke-runs every mode | CI run 45064682765. The undefined name had survived an explicit read-back of its own region — reading a line is not checking a line | Kept |
+
+## First measured results
+
+CI, this repository, 7 files, 10 auto queries, budget 4,000 tokens. The first
+numbers the harness has ever produced.
+
+| policy | recall | tokens | recall/1k |
+| --- | --- | --- | --- |
+| read_all | 0.500 | 3,552 | 0.141 |
+| grep_files | 0.900 | 2,188 | 0.411 |
+| pagerank_map | 0.100 | 1,659 | 0.060 |
+| **ladder** | **1.000** | **1,611** | **0.621** |
+
+At a 1,000-token budget: ladder 1.864, pagerank_map 0.119, grep_files 0.000,
+read_all 0.000. Ladder won at every budget tried.
+
+What this does and does not say:
+
+- **The ladder's own claim survives its first test** — 4.4x grep per token, and
+  the only policy at full recall.
+- **The "outlines first" hypothesis is falsified.** `pagerank_map` is outline-only
+  and ranks worst, below grep. A signature map alone does not reach the answer;
+  the ladder's scoped windows do the work. Struck through in the hypothesis list,
+  not deleted.
+- **Seven files is not a corpus.** The auto queries come from this repo's own rare
+  identifiers and one file is 930 lines of the bench itself. The ranking claim
+  needs 50+ files before it counts as evidence about real codebases.
 
 Later versions append a row. Reverted changes stay in the table, marked reverted,
 with the number that killed them. Deleting a failed change hides the only thing
@@ -68,8 +96,11 @@ Each time the protocol is used on real work:
 
 Queued, not yet tested. Cheap to test, so test them rather than arguing:
 
-- **Outlines first always beat windows first** on files ranked 1–3, because you
-  cannot choose a window without knowing which declaration you are aiming at.
+- ~~**Outlines first always beat windows first** on files ranked 1–3.~~ **Falsified**
+  on the first measured run: outline-only `pagerank_map` scored 0.060 recall/1k,
+  the worst of four policies and below plain grep. A signature map alone does not
+  reach the answer — the windows do the work. Kept struck through, because a
+  deleted failed hypothesis teaches nothing.
 - **A two-strike stop rule cuts tokens more than better ranking does.** Ranking
   improves the hit rate; stopping bounds the misses. The bound may be worth more.
 - **The expensive part is authoring, not retrieving.** 824 lines authored, 202 read

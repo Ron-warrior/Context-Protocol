@@ -8,7 +8,7 @@ This is the root README on purpose. It is the only file loaded into every chat o
 this project, so it is the only place a rule can live and actually take effect.
 Everything else is loaded on demand — which is also rung 1.
 
-Version: 1.2.0 — supersedes 1.1.0 (TRACE.md says what it got wrong)
+Version: 1.3.0 — supersedes 1.2.0 (TRACE.md says what it got wrong)
 
 ---
 
@@ -16,9 +16,8 @@ Version: 1.2.0 — supersedes 1.1.0 (TRACE.md says what it got wrong)
 
 **Effectiveness = P(correct answer) per token spent.**
 
-Not recall, not graph size, not "we indexed the repo". Attention is O(n²) over
-context tokens: every token pays twice, once to be read and once to dilute
-everything else. The goal is the least context that decides the next action.
+Not recall, not graph size. Attention is O(n²): every token pays twice, once to
+be read and once to dilute. The goal is the least context that decides the action.
 
 ## The ladder
 
@@ -41,7 +40,7 @@ Climb one rung at a time. Never start below the rung you can justify.
    not one 400-line file. Past ~120 lines in a single write you will not re-read
    it, and what you did not re-read is where the defects are. Check before you
    extend.
-6. **Verify.** Two checks, in this order:
+6. **Verify.** Three checks, in this order:
 
    (a) **Read back.** Before you claim anything works, the **last operation you
    performed on that region** must be a read. For an edited file that read is
@@ -52,9 +51,12 @@ Climb one rung at a time. Never start below the rung you can justify.
    (b) **Caller sweep.** `search_files` every caller of every symbol whose
    signature, name or behaviour changed. An unverified edit is a claim, not a
    change.
+
+   (c) **Run it.** If the project runs, run it. Reading a line does not execute
+   it — a `NameError` survived inside a region I had read. Coverage is not a test.
+
 7. **Persist.** Write what you learned into the project so the next session does
-   not pay for it again. A fact that lives only in a finished chat is re-derived
-   at full price.
+   not pay for it again. A fact that lives only in a finished chat gets re-derived.
 
 ## Hard rules
 
