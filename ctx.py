@@ -574,6 +574,18 @@ def cmd_query(args) -> int:
         print("no source files", file=sys.stderr)
         return 1
     words = words_of(args.question)
+    if getattr(args, "rank_only", False):
+        # The ranking without the content: for an agent that wants to choose its
+        # own reads, or a human checking that the question is even landing.
+        ranked = rank(files, words)
+        if not ranked:
+            print(f"no match for {args.question!r} in {len(files)} files", file=sys.stderr)
+            return 0
+        for score, source in ranked:
+            print(f"{score:8.2f}  {source.path}")
+        print(f"\n{len(ranked)} of {len(files)} files matched", file=sys.stderr)
+        return 0
+
     if getattr(args, "explain", False):
         print("rank (score  path)", file=sys.stderr)
         for score, source in rank(files, words)[:5]:
@@ -913,6 +925,10 @@ def main(argv: list[str] | None = None) -> int:
     for parser_ in (p_query, p_ask):
         parser_.add_argument(
             "--budget", type=int, default=None, help="default: .ctxrc, else 4000"
+        )
+        parser_.add_argument(
+            "--rank-only", dest="rank_only", action="store_true",
+            help="print the ranked files and scores, no content",
         )
 
     p_bench = sub.add_parser("bench", help="recall, then tokens, then time")
