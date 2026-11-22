@@ -55,3 +55,49 @@ jobs:
         run: python3 eval/retrieval_bench.py corpus --auto 25 --ablate
       - name: Outline-share sweep on a real repository
         run: python3 eval/retrieval_bench.py corpus --auto 25 --outline-sweep 0.2,0.4,0.6
+
+
+  ctx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile
+        run: python3 -m py_compile ctx.py
+      - name: Self-test
+        run: python3 ctx.py selftest
+      - name: Install as a console script
+        run: |
+          set -euxo pipefail
+          python3 -m venv .venv-ctx
+          source .venv-ctx/bin/activate
+          pip install --quiet .
+          which ctx
+          ctx selftest
+          ctx map . | head -n 5
+      - name: Query this repository
+        run: |
+          set -euo pipefail
+          python3 ctx.py query . "how does the ladder rank files"
+      - name: Bench this repository
+        run: |
+          set -euo pipefail
+          python3 ctx.py bench . --queries 10
+      - name: Check out a real corpus
+        uses: actions/checkout@v4
+        with:
+          repository: tashfeenahmed/freellmapi
+          fetch-depth: 1
+          sparse-checkout: |
+            server/src
+            shared
+            cli
+          path: corpus
+      - name: Query and bench the real corpus with ctx
+        run: |
+          set -euo pipefail
+          python3 ctx.py query corpus "how are provider keys stored" --budget 2000
+          python3 ctx.py bench corpus --queries 10

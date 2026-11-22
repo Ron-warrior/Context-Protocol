@@ -12,6 +12,23 @@ Version: 1.3.0 — supersedes 1.2.0 (TRACE.md says what it got wrong)
 
 ---
 
+## Use it
+
+**In a chat.** Paste this repository's URL. The agent reads [`SKILL.md`](SKILL.md) and
+has the whole procedure — no install, no key, no build step. It works because the
+ladder is a sequence of instructions, not an index: an agent with only grep and
+read still gets the benefit.
+
+**On a machine.**
+
+```bash
+pipx install git+https://github.com/Ron-warrior/Context-Protocol
+ctx query . "how are errors handled"
+```
+
+No dependencies. Standard library only. `ctx map`, `ctx query`, `ctx bench`,
+`ctx selftest`.
+
 ## The metric
 
 **Effectiveness = P(correct answer) per token spent.**
