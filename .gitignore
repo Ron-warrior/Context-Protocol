@@ -4,6 +4,8 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+# The install in CI creates .venv-ctx, which the patterns above miss.
+.venv*/
 
 # Benchmark scratch output
 eval/graphify-out/
