@@ -481,3 +481,30 @@ What that changed in `ctx`:
 `--lean` keeps the old token-first policy so the trade-off stays measurable rather
 than asserted: the next corpus run reports both, and if lean ever matches
 intelligence on recall, intelligence-first is paying for nothing and gets cut.
+
+
+## Trace: ctx 2.1.0 → 2.3.0, twenty iterations
+
+Twenty changes to `ctx`, batched so each batch could be committed and checked.
+Countable facts, not a feature list:
+
+| Batch | Changes | Selftest checks |
+| --- | --- | --- |
+| 2.1.0 | stemmer, best-hit-line scoring, .gitignore, `ask`, `--explain` | 18 → 25 |
+| 2.2.0 | call sites, declared_symbols, block dedup, second hop, `.ctxrc` | 25 → 26 |
+| 2.3.0 | `path`, `plan`, bench delta, output header | 26 → 27 |
+
+**One defect caught before commit, in the batch that introduced it.** The
+`--budget` loop iterated over `(p_query, p_ask)` *before* `p_ask` existed — a
+`NameError` raised while building the argument parser, which would have crashed
+every `ctx` command, not just the one being changed. `p_ask` also declared
+`--budget` itself, so the fix was ordering plus removing the duplicate. This is
+the third time an edit to a shared region has produced a crash-class defect that
+only the *next* read revealed; the read-back is what caught it.
+
+**What is still unmeasured.** None of these twenty changes has been scored. The
+bench runs in CI on this repo and on the 795-file corpus, and the delta line now
+prints whether intelligence-first actually beats `lean` on recall — but no number
+from that run is in this file yet. Ten of the twenty iterations were justified by
+reasoning about what should help, not by a measurement showing it did. That is the
+honest split, and it is why the bench delta exists.

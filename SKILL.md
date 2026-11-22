@@ -55,16 +55,20 @@ file.
 ## Mode 2 — the CLI
 
 ```bash
-ctx map .                                  # file map with line counts
-ctx query . "how are errors handled"       # the ladder, ranked and budgeted
-ctx query . "auth refresh" --budget 1500 --json
-ctx bench . --queries 25                   # read_all vs grep vs ladder
-ctx selftest                               # fixtures; exit 0 means it works
+ctx ask "how are errors handled"     # path defaults to cwd
+ctx query . "auth refresh" --explain # score and path for the top five files
+ctx query . "auth refresh" --budget 1500 --lean   # token-first baseline
+ctx path User Store                  # files mentioning both, with line numbers
+ctx map .                            # file map with line counts
+ctx bench . --queries 25             # recall, then tokens, then ms
+ctx plan                             # the ladder as a checklist, no install needed
+ctx selftest                         # fixtures; exit 0 means it works
 ```
 
-`ctx query` prints three things: a signature map of the ranked files, scoped
-windows around the matched lines, and a one-line footer with chunks/tokens/files
-scanned. It never reads a file it has no reason to read.
+`ctx query` emits, in this order: the enclosing block of each match (the answer),
+a signature map of ranked files, blocks from lower-ranked matches, one hop of
+imports, and call sites of what it found. It never reads a file it has no reason
+to read, and `.gitignore` plus `.ctxrc` (`budget=`, `expand=off`) are honoured.
 
 ## Mode 3 — measure before you trust
 
