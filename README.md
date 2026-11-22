@@ -8,7 +8,7 @@ This is the root README on purpose. It is the only file loaded into every chat o
 this project, so it is the only place a rule can live and actually take effect.
 Everything else is loaded on demand — which is also rung 1.
 
-Version: 2.0.0 — the objective is now ordered: intelligence, then tokens, then speed
+Version: 2.10.0 — the objective is ordered: intelligence, then tokens, then speed
 
 ---
 
@@ -130,8 +130,11 @@ Climb one rung at a time. Never start below the rung you can justify.
 
 | File | What it is | Load it when |
 | --- | --- | --- |
+| `SKILL.md` | The agent-facing entry point: three modes, one of which needs no install at all | Pasting this URL into an agent |
+| `ctx.py` | The CLI: map, query, ask, path, bench, plan, selftest. Stdlib only | Running it |
 | `FINDINGS.md` | Why these rules, ranked against the alternatives, with numbers | Adding a tool |
 | `TRACE.md` | Countable units and the measured trace behind each version | Bumping a version |
 | `SCOREBOARD.md` | Measured results per version, and the promotion rule | Changing this file |
 | `PROTOCOL.md` | Long form: per-situation playbook, budgets, memory schema | Unfamiliar task |
-| `eval/retrieval_bench.py` | Harness: recall per 1k tokens, stop rules, self-test | Changing this file |
+| `eval/retrieval_bench.py` | Research harness: recall per 1k, stop rules, ablation, self-test | Changing the method |
+| `eval/compare_graphify.py` | Scores graphify's own query output on the same metric | Comparing against it |
