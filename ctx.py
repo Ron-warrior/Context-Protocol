@@ -163,7 +163,13 @@ def load(root: Path) -> list[Source]:
         if not path.is_file():
             continue
         rel = path.relative_to(root)
-        if any(part in SKIP_DIRS for part in rel.parts[:-1]):
+        # `.venv-ctx`, `.venv312`, `venv`, `env` … any of these is the tool's own
+        # environment, not the user's code. Scanning it produced a file map of
+        # site-packages in CI.
+        if any(
+            part in SKIP_DIRS or part.startswith(".venv") or part == "site-packages"
+            for part in rel.parts[:-1]
+        ):
             continue
         if is_ignored(rel, ignores):
             continue
@@ -742,6 +748,13 @@ def cmd_selftest(_args) -> int:
         assert len(files) == 2, f"expected 2 files, got {len(files)}"
         checks += 1
 
+        # A venv inside the scan root is the tool's environment, not the corpus.
+        venv = root / ".venv-ctx" / "lib" / "site-packages"
+        venv.mkdir(parents=True)
+        (venv / "installed.py").write_text("def leaked_name():\n    pass\n", encoding="utf-8")
+        assert len(load(root)) == 2, "a .venv-ctx directory must not be scanned"
+        checks += 1
+
         assert tokens("abcd" * 10) == 10, "token estimate must be chars/4"
         checks += 1
 
@@ -843,8 +856,19 @@ def main(argv: list[str] | None = None) -> int:
     p_plan.set_defaults(func=cmd_plan)
 
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except BrokenPipeError:
+        # Console scripts call main() directly, so the __main__ guard never runs.
+        # A closed pipe is a normal pipeline ending, not a failure.
+        return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv[1:]))
+    try:
+        raise SystemExit(main(sys.argv[1:]))
+    except BrokenPipeError:
+        # `ctx map . | head` closes stdout early. That is a normal shell pipeline,
+        # not an error, so exit 0 without a traceback.
+        sys.stderr.close()
+        raise SystemExit(0)
