@@ -196,28 +196,34 @@ justify one. A protocol bump needs a rule that changed.
 
 ## Product numbers (`ctx`, not the research harness)
 
-First measured output of the shipped tool. Corpus: freellmapi, 795 files,
-10 auto-generated queries, budget 4000 tokens per query.
+Corpus: freellmapi, 795 files, **25 queries**, budget 4000 tokens. Real emission,
+not a capped report.
 
-| policy | recall | tokens | ms |
-| --- | --- | --- | --- |
-| intelligence (default) | 0.800 | 3493 | 143.9 |
-| lean (`--lean`) | 0.700 | 2990 | 127.3 |
+| policy | recall | tokens | over budget | ms |
+| --- | --- | --- | --- | --- |
+| read_all | 1.000 | 1,960,580 | 25/25 | 55.8 |
+| grep | 0.960 | 658,020 | 22/25 | 62.5 |
+| **intelligence** | **0.800** | **2,968** | – | 103.0 |
+| lean (`--lean`) | 0.760 | 2,571 | – | 83.5 |
 
-**Intelligence-first: +0.100 recall for +503 tokens.** On this corpus the
-enclosing-body, call-site and co-occurrence work paid for itself — the tool got
-better at answering, not just at compressing.
+**The number that matters is the pairing.** `read_all` reaches 1.000 recall by
+emitting **660x the budget** — 1.96M tokens. The best policy that fits in the
+budget reaches 0.800 for 2,968. Buying the last 0.2 recall costs three orders of
+magnitude in tokens, which is the whole argument of this project stated as a
+table rather than a claim.
 
-**Two cautions, both real:**
+**Intelligence vs lean: +0.040 recall for +397 tokens** (15% more tokens for 5%
+more recall). Honest reading:
 
-- `read_all` and `grep` scored 1.000 because that run reported
-  `min(tokens(emitted), budget)`. They dump the corpus and the column capped the
-  cost. Fixed in 2.5.0; the table above is unaffected by that bug, but the run it
-  came from also printed a misleading winner.
-- Ten queries is not enough to separate 0.1 recall from noise. CI now runs 25
-  queries on three corpora (this repo, the 795-file TypeScript one, and
-  graphify's own Python source). Those numbers are not in yet.
+- The gain is real but small, and it shrank from +0.100 at 10 queries to +0.040 at
+  25. The first number was partly noise; this one is better evidenced and less
+  flattering.
+- Under the stated objective (intelligence first, tokens second) a recall gain at
+  a token cost is the correct trade — but +0.040 on one corpus is close enough to
+  noise that the margin needs a larger sample before the extra phases are called
+  proven.
+- If a 100-query run shows no recall gain, the second hop and call-site phases go.
 
-What would retire the intelligence-first default: if it fails to beat `--lean` on
-recall across the larger runs, the extra tokens buy nothing and the phases that
-cost them come out.
+What would retire the intelligence-first default: no recall gain over `--lean` on
+a 100-query run. That test is now in CI.
+

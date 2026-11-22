@@ -82,7 +82,7 @@ jobs:
       - name: Bench this repository (intelligence vs lean)
         run: |
           set -euo pipefail
-          python3 ctx.py bench . --queries 25
+          python3 ctx.py bench . --queries 100
       - name: Check out a second corpus (Python, not TypeScript)
         uses: actions/checkout@v4
         with:
@@ -95,7 +95,7 @@ jobs:
       - name: Bench the second corpus
         run: |
           set -euo pipefail
-          python3 ctx.py bench corpus2 --queries 25
+          python3 ctx.py bench corpus2 --queries 100
       - name: Install as a console script
         run: |
           set -euxo pipefail
@@ -119,4 +119,4 @@ jobs:
         run: |
           set -euo pipefail
           python3 ctx.py query corpus "how are provider keys stored" --budget 2000
-          python3 ctx.py bench corpus --queries 25
+          python3 ctx.py bench corpus --queries 100
