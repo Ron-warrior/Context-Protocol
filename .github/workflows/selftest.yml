@@ -71,13 +71,20 @@ jobs:
         run: |
           set -euo pipefail
           python3 ctx.py --version
-          # The stamp drifted twice tonight (2.6.0 at 2.12.0, 2.10.0 at 2.13.0).
-          # Compare the two strings exactly instead of trusting a manual bump.
+          # The stamp drifted three times now (2.6.0 at 2.12.0, 2.10.0 at 2.13.0,
+          # and pyproject.toml sat at 2.0.0 through seventeen releases because the
+          # check below only looked at two files). Every file that carries the
+          # number is compared against every other, exactly.
           code=$(grep -oE '__version__ = "[0-9.]+"' ctx.py | grep -oE '[0-9.]+')
           readme=$(grep -oE 'Version: [0-9]+\.[0-9]+\.[0-9]+' README.md | grep -oE '[0-9.]+')
-          echo "code=$code readme=$readme"
+          pkg=$(grep -oE '^version = "[0-9.]+"' pyproject.toml | grep -oE '[0-9.]+')
+          echo "code=$code readme=$readme pyproject=$pkg"
           [ "$code" = "$readme" ] || {
             echo "version drift: ctx.py has $code, README.md has $readme"
+            exit 1
+          }
+          [ "$code" = "$pkg" ] || {
+            echo "version drift: ctx.py has $code, pyproject.toml has $pkg"
             exit 1
           }
       - name: Self-test
