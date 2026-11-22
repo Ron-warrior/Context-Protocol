@@ -561,3 +561,37 @@ hides its own mis-scoring is how the last one got published.
 **What this cost.** About ninety minutes of iterations with no number, because the
 measurement sat behind an install step that failed three times. Three of the twenty
 "iterations" were fixing the tool that measures, not the tool itself.
+
+
+## Trace: the night the protocol got measured properly
+
+One long session, ~15 commits, `ctx` 2.1.0 → 2.12.0. The point of recording it is
+the split between what the numbers justified and what only reading justified.
+
+**What the measurement bought.** At 100 queries on 795 files, intelligence-first
+beats the token-first baseline by **+0.080 recall (normal) and +0.070 (hard)** for
+~250 extra tokens. Held across three sample sizes (10 → 25 → 100) once the
+accounting was fixed. Four phases earned their place; the default is defensible.
+
+**What reading the code bought, before any number:**
+
+| Defect | How it surfaced |
+| --- | --- |
+| `read_all` reported `min(emitted, budget)`, so a dump scored 1.000 at no cost | The first bench whose numbers made no sense |
+| `enclosing_block` could end *before* the matched line | Re-reading a function I had just written |
+| `const handler = async () => {}` was not a declaration | Noticing TS functions were invisible to call-site expansion |
+| `p_query` loop referenced `p_ask` before it existed (NameError on every command) | Read-back of the edit itself |
+| `ctx map .` listed site-packages from its own `.venv-ctx` | CI log |
+| `BrokenPipeError` and exit 1 on `| head` | CI log |
+| `__version__` said 2.6.0 at 2.12.0 | Reading the constant during an unrelated edit |
+| Test asserted a file imports itself | CI, after three failed runs hid the benchmark |
+
+**The cost of the ordering mistake.** `ctx bench` sat after the `install` step in
+CI. Three consecutive runs failed on install-adjacent bugs, so the benchmark never
+ran and none of the above could be *measured* until it was reordered. Roughly
+ninety minutes of iteration produced no number for that reason alone.
+
+**What is still unproven.** 0.72 recall is the ceiling of the current design on
+this corpus. The 28% misses are not characterised — never-ranked file, or budget
+exhausted — and until they are, more phases are guessing. That is the next
+measurement, not the next feature.

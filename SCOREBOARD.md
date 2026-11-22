@@ -196,34 +196,47 @@ justify one. A protocol bump needs a rule that changed.
 
 ## Product numbers (`ctx`, not the research harness)
 
-Corpus: freellmapi, 795 files, **25 queries**, budget 4000 tokens. Real emission,
-not a capped report.
+Corpus: freellmapi, 795 files, **100 queries**, budget 4000 tokens. Real emission.
+
+**Normal** — needles that appear in at most two files:
 
 | policy | recall | tokens | over budget | ms |
 | --- | --- | --- | --- | --- |
-| read_all | 1.000 | 1,960,580 | 25/25 | 55.8 |
-| grep | 0.960 | 658,020 | 22/25 | 62.5 |
-| **intelligence** | **0.800** | **2,968** | – | 103.0 |
-| lean (`--lean`) | 0.760 | 2,571 | – | 83.5 |
+| read_all | 1.000 | 1,960,580 | 100/100 | 59.6 |
+| grep | 0.990 | 736,338 | 95/100 | 75.1 |
+| **intelligence** | **0.720** | **2,876** | – | 78.4 |
+| lean (`--lean`) | 0.640 | 2,621 | – | 113.1 |
 
-**The number that matters is the pairing.** `read_all` reaches 1.000 recall by
-emitting **660x the budget** — 1.96M tokens. The best policy that fits in the
-budget reaches 0.800 for 2,968. Buying the last 0.2 recall costs three orders of
-magnitude in tokens, which is the whole argument of this project stated as a
-table rather than a claim.
+**Hard** — needles that exist in exactly one file, so there is no second chance:
 
-**Intelligence vs lean: +0.040 recall for +397 tokens** (15% more tokens for 5%
-more recall). Honest reading:
+| policy | recall | tokens | over budget |
+| --- | --- | --- | --- |
+| grep | 1.000 | 704,380 | 92/100 |
+| read_all | 1.000 | 1,960,580 | 100/100 |
+| **intelligence** | **0.720** | **2,738** | – |
+| lean | 0.650 | 2,503 | – |
 
-- The gain is real but small, and it shrank from +0.100 at 10 queries to +0.040 at
-  25. The first number was partly noise; this one is better evidenced and less
-  flattering.
-- Under the stated objective (intelligence first, tokens second) a recall gain at
-  a token cost is the correct trade — but +0.040 on one corpus is close enough to
-  noise that the margin needs a larger sample before the extra phases are called
-  proven.
-- If a 100-query run shows no recall gain, the second hop and call-site phases go.
+### What this settles
 
-What would retire the intelligence-first default: no recall gain over `--lean` on
-a 100-query run. That test is now in CI.
+**Intelligence-first beats lean at 100 queries, on both difficulty settings:**
++0.080 normal, +0.070 hard, for 235–255 extra tokens. The direction held across
+three sample sizes (10, 25, 100 queries) and the magnitude settled around 7–8
+points rather than the 10 first measured. The extra phases — enclosing bodies,
+call sites, co-occurrence ranking, stemming — buy roughly 7% more answers for
+about 10% more tokens. Under the stated objective that is the correct trade, and
+it is now evidenced rather than argued.
+
+**The absolute numbers stay humbling.** Best-in-budget recall is 0.72. More than a
+quarter of single-file facts are still missed by a policy that fits the budget.
+`grep` reaches 0.99–1.00 only by emitting 700k+ tokens — 175x the budget — and
+`read_all` reaches 1.000 at 490x. The honest framing: a bounded policy gets about
+72% of the answers, and the last 28% costs two orders of magnitude.
+
+**Where to look next**: the 28% misses, not more features. A needle is missed when
+its file is never ranked (so no body is emitted) or when the budget ends before
+its phase. Distinguishing those two is the next measurement.
+
+`lean` also ran *slower* here (113ms vs 78ms), which makes no sense for a
+cheaper policy and is probably noise on a shared runner. Noted, not acted on.
+
 
