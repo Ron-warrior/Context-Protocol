@@ -742,6 +742,23 @@ def cmd_bench(args) -> int:
         )
         if ai[0] <= ln[0] and ai[1] >= ln[1]:
             print("lean wins on both -- intelligence-first is paying for nothing here")
+
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "corpus": args.path,
+            "files": len(files),
+            "queries": len(queries),
+            "budget": args.budget,
+            "policies": {
+                name: {
+                    "recall": round(recall, 3),
+                    "tokens": round(tokens_, 0),
+                    "over_budget": over,
+                    "ms": round(ms, 1),
+                }
+                for recall, tokens_, over, ms, name in rows
+            },
+        }, indent=2))
     return 0
 
 
@@ -900,6 +917,7 @@ def main(argv: list[str] | None = None) -> int:
     p_bench.add_argument("--queries", type=int, default=25)
     p_bench.add_argument("--budget", type=int, default=4000)
     p_bench.add_argument("--seed", type=int, default=0)
+    p_bench.add_argument("--json", action="store_true", help="machine-readable results")
     p_bench.set_defaults(func=cmd_bench)
 
     p_self = sub.add_parser("selftest", help="run fixtures")
