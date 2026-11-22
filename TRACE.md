@@ -451,3 +451,33 @@ picks one arbitrarily, so an exact 0.213 == 0.213 tie printed "an ablation beats
 default — a rung-2 claim is losing". Fixed in 1.14.0 to treat ties as ties. The
 error was in the pessimistic direction, which is still an error: a false alarm
 that makes the protocol look more self-critical than it is.
+
+
+## Trace: the objective reordered (protocol 2.0.0)
+
+This one is a **requirement change, not a measured one** — stated plainly because
+every other version here was derived from a failure, and pretending otherwise
+would corrupt the record.
+
+The old objective was a ratio: `P(correct) / tokens`. A ratio has a degenerate
+maximum — answer nothing, spend nothing. That is not a hypothetical: it is what
+graphify's benchmark does when it divides by an estimated corpus size and never
+checks whether the answer is present.
+
+The objective is now ordered and lexical: **intelligence, then token efficiency,
+then speed.** A cheaper answer that is wrong loses to an expensive one that is
+right.
+
+What that changed in `ctx`:
+
+| Before | After |
+| --- | --- |
+| Signature map first (40% of budget), then ±4-line windows | Enclosing block of every match first, then the map |
+| Ranking counted raw occurrences | Rank adds symbol-name matches (×4) and two-word co-occurrence (×3) |
+| Substring matching | Identifiers split: `refreshToken` matches `refresh token` |
+| No cross-file step | One hop of imports from the top two files, outlines only |
+| Bench ranked by recall/1k | Bench ranks by recall, then tokens, then ms |
+
+`--lean` keeps the old token-first policy so the trade-off stays measurable rather
+than asserted: the next corpus run reports both, and if lean ever matches
+intelligence on recall, intelligence-first is paying for nothing and gets cut.

@@ -8,7 +8,7 @@ This is the root README on purpose. It is the only file loaded into every chat o
 this project, so it is the only place a rule can live and actually take effect.
 Everything else is loaded on demand — which is also rung 1.
 
-Version: 1.3.0 — supersedes 1.2.0 (TRACE.md says what it got wrong)
+Version: 2.0.0 — the objective is now ordered: intelligence, then tokens, then speed
 
 ---
 
@@ -29,12 +29,19 @@ ctx query . "how are errors handled"
 No dependencies. Standard library only. `ctx map`, `ctx query`, `ctx bench`,
 `ctx selftest`.
 
-## The metric
+## Objective
 
-**Effectiveness = P(correct answer) per token spent.**
+Ordered, and the order is the point:
 
-Not recall, not graph size. Attention is O(n²): every token pays twice, once to
-be read and once to dilute. The goal is the least context that decides the action.
+1. **Intelligence.** The answer must be in the context. A cheap answer that is
+   wrong loses to an expensive one that is right.
+2. **Token efficiency.** Spend the fewest tokens *subject to* (1).
+3. **Speed.** Only once both of the above hold.
+
+This is why `ctx query` emits the **enclosing function** of every match *before*
+any signature map, and why `ctx bench` ranks by recall first and tokens second. A
+metric that divides by tokens alone rewards answering nothing, cheaply — which is
+exactly what a compression benchmark does.
 
 ## The ladder
 

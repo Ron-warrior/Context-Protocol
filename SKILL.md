@@ -12,6 +12,15 @@ in decreasing order of setup:
 2. **CLI** — `pipx install git+https://github.com/Ron-warrior/Context-Protocol`
 3. **Bench** — measure any policy on recall per 1k tokens before trusting it.
 
+## Objective, in order
+
+1. **Intelligence** — the answer must be in the context.
+2. **Token efficiency** — fewest tokens *subject to* (1).
+3. **Speed** — only once both hold.
+
+Never trade (1) for (2). A short context that omits the answer is not efficient.
+When in doubt, read the enclosing function, not a window around the match.
+
 ## Why this exists
 
 Indexes answer "what is in this corpus". They do not answer "what should go in
