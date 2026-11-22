@@ -44,6 +44,9 @@ Policies compared, in one pass, at the same budget:
 | 1.3.0 | `--stop`: four stopping rules (`until_found`, `three_strike`, `two_strike`, `one_strike`) scored on answer rate per token with the ranking held fixed | The stop-rule hypothesis below was unfalsifiable with no instrument. Now it has one; the numbers are still unrun | Kept |
 | 1.4.0 | Bench: one `chunk_cost` shared by both budget paths; outline fallback for declaration-less files; per-file cost cached on `Corpus` | Reading 1.1.1's bench against rung 6. The cost-cache defect was introduced by 1.3.0 minutes earlier and caught by 1.3.0's own read-back | Kept |
 | 1.5.0 | `--selftest`: 12 fixture assertions encoding the three defects 1.4.0 fixed | A harness that has never run cannot be evidence. The fixture makes the first run a test of the instrument, not of the repo | Kept |
+| 1.6.0 | Rung 2 implemented: `Ranking` knobs for focus, definition-over-usage and length damping, each a flag so it can lose; whole-token matching replaces substring matching in recall and in stop-rule answers; five new self-test assertions (17 total) | Re-reading the bench against rung 2 found all three ranking clauses were **not implemented** — every occurrence weighed the same. Substring matching credited `refresh_token` inside `refresh_token_legacy` in every policy alike | Kept |
+| 1.7.0 | `--sweep 1000,4000,16000`: recall per 1k at several budgets, and whether the winner holds | One budget is one point. A policy that wins at 4k can lose at 16k, and the protocol's budget-cap rule is only justified if the ranking holds across the cap | Kept |
+| 1.8.0 | Bench: `run_stop` unpacked a 2-tuple from the 3-tuple `prepare` now returns (would have crashed `--stop`); `--queries` load errors reported cleanly; `--sweep` and `--focus` validated in `main` | Read-back of the 1.6.0 region after the edit found the crash. Caller sweep then covered every changed signature | Kept |
 
 Later versions append a row. Reverted changes stay in the table, marked reverted,
 with the number that killed them. Deleting a failed change hides the only thing
@@ -88,3 +91,9 @@ Queued, not yet tested. Cheap to test, so test them rather than arguing:
 - **Cross-file rename is where text-level tools lose hardest** — the one case where
   an LSP-backed tool (Serena) would pay for its install cost outright. Unchanged.
 
+
+
+**Versioning note.** The protocol (README.md) is at 1.2.0. The bench has its own
+version track from 1.4.0 on, because it changed and the protocol did not. Rows
+1.6.0–1.8.0 are bench versions; they do not bump the protocol, and no rule in
+README.md changed to justify one. A protocol bump needs a rule that changed.

@@ -29,6 +29,8 @@ Usage
     python3 eval/retrieval_bench.py .
     python3 eval/retrieval_bench.py . --budget 4000 --auto 30
     python3 eval/retrieval_bench.py . --queries q.json
+    python3 eval/retrieval_bench.py . --sweep 1000,4000,16000
+    python3 eval/retrieval_bench.py . --focus src/app.py
     python3 eval/retrieval_bench.py . --stop
     python3 eval/retrieval_bench.py --selftest
 
@@ -97,6 +99,17 @@ IMPORT_RES = [
 
 IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{5,}")
 SPLIT_RE = re.compile(r"[_\W]+|(?<=[a-z])(?=[A-Z])")
+IDENT_LIKE_RE = re.compile(r"^[A-Za-z_][\w.]*$")
+
+# A line that declares something. Used to tell a definition hit from a usage hit,
+# which rung 2 ranks differently and which nothing here could distinguish before
+# 1.6.0: every occurrence counted the same.
+DEF_RE = re.compile(
+    r"^\s*(?:export\s+|pub\s+|public\s+|private\s+|protected\s+|static\s+"
+    r"|async\s+|final\s+|abstract\s+|open\s+|override\s+|internal\s+|readonly\s+)*"
+    r"(?:class|def|function|func|fn|interface|struct|enum|trait|impl|type|let"
+    r"|const|var|record|module|namespace|object)\b"
+)
 
 
 @dataclass
@@ -112,6 +125,78 @@ class Corpus:
     outline: dict[str, list[str]] = field(default_factory=dict)
     stems: dict[str, list[str]] = field(default_factory=dict)
     cost: dict[str, int] = field(default_factory=dict)
+    imported_by: dict[str, set[str]] = field(default_factory=dict)
+    scan: dict[str, tuple[list[str], list[bool]]] = field(default_factory=dict)
+
+
+@dataclass
+class Ranking:
+    """The knobs behind rung 2, one per clause of it.
+
+    Each default *is* the protocol's claim, and each one is a flag so the claim can
+    lose rather than be assumed. Before 1.6.0 all three clauses were simply not
+    implemented -- `personalize` counted every occurrence the same way -- which
+    meant this bench could not test the ranking rule it was built to test. A
+    harness that cannot fail the thing it measures is decoration.
+    """
+
+    focus: str | None = None          # "near the file you are editing > far"
+    focus_weight: float = 3.0
+    definition_weight: float = 4.0    # "definition hit > usage hit"; 1.0 disables
+    length_damping: float = 0.5       # "small > large"; 0.0 disables
+
+
+def scan_text(text: str) -> tuple[list[str], list[bool]]:
+    """Lowercase lines and their declaration flags, computed once per file.
+
+    Cached on the Corpus because a sweep re-ranks per query per budget; without the
+    cache the same file would be lowercased and regex-matched dozens of times.
+    """
+    lines = text.splitlines()
+    return [line.lower() for line in lines], [bool(DEF_RE.match(line)) for line in lines]
+
+
+def weighted_hits(
+    scan: tuple[list[str], list[bool]], keywords: list[str], definition_weight: float
+) -> float:
+    """Occurrences, with a hit on a declaration line counted `definition_weight` times."""
+    if not keywords:
+        return 0.0
+    low_lines, is_definition = scan
+    score = 0.0
+    for index, low in enumerate(low_lines):
+        weight = definition_weight if is_definition[index] else 1.0
+        for keyword in keywords:
+            found = low.count(keyword)
+            if found:
+                score += found * weight
+    return score
+
+
+def mentions(text: str, needle: str) -> bool:
+    """Does `text` mention `needle` as a token, not as part of a longer one?
+
+    The substring test this replaces counted `refresh_token` as present in
+    `refresh_token_legacy`, so both recall and the stop-rule answer rate credited
+    partial matches. Every policy inflated in the same direction, which is exactly
+    why it survived three versions: it looked fair.
+    """
+    if IDENT_LIKE_RE.match(needle):
+        pattern = r"(?<![A-Za-z0-9_])" + re.escape(needle) + r"(?![A-Za-z0-9_])"
+        return re.search(pattern, text, re.IGNORECASE) is not None
+    return needle.lower() in text.lower()
+
+
+def resolve_focus(corpus: Corpus, focus: str | None) -> str | None:
+    """Exact path, else a unique suffix match; None when it is not in the corpus."""
+    if not focus:
+        return None
+    wanted = focus.strip().lstrip("./")
+    known = {source.path for source in corpus.files}
+    if wanted in known:
+        return wanted
+    matches = sorted(path for path in known if path.endswith("/" + wanted))
+    return matches[0] if len(matches) == 1 else None
 
 
 def estimate_tokens(text: str) -> int:
@@ -196,19 +281,45 @@ def load_corpus(root: Path) -> Corpus:
         corpus.edges[source.path] = targets
 
     for source in corpus.files:
+        corpus.imported_by.setdefault(source.path, set())
+        for target in corpus.edges.get(source.path, ()):
+            corpus.imported_by.setdefault(target, set()).add(source.path)
+
+    for source in corpus.files:
         corpus.cost[source.path] = chunk_cost(source.path, source.text)
         corpus.outline[source.path] = outline_lines(source.text)
+        corpus.scan[source.path] = scan_text(source.text)
 
     return corpus
 
 
-def personalize(corpus: Corpus, keywords: list[str]) -> dict[str, float]:
-    """Query-conditioned prior: files that mention the question more, start higher."""
+def personalize(
+    corpus: Corpus, keywords: list[str], rank: Ranking | None = None
+) -> dict[str, float]:
+    """Query- and chat-conditioned prior: one term per clause of rung 2.
+
+    focus -> the file and its import neighbours start higher
+    definition_weight -> a declaration outranks a usage
+    length_damping -> a small file outranks a large one at equal hits
+    """
+    rank = rank or Ranking()
+    focus = resolve_focus(corpus, rank.focus)
+
+    boost: dict[str, float] = {}
+    if focus:
+        boost[focus] = rank.focus_weight
+        for target in corpus.edges.get(focus, ()):
+            boost[target] = max(boost.get(target, 0.0), rank.focus_weight / 2.0)
+        for importer in corpus.imported_by.get(focus, ()):
+            boost[importer] = max(boost.get(importer, 0.0), rank.focus_weight / 3.0)
+
     weights: dict[str, float] = {}
     for source in corpus.files:
-        low = source.text.lower()
-        hits = sum(low.count(keyword) for keyword in keywords) if keywords else 0
-        weights[source.path] = float(hits) + 1.0
+        lines, is_definition = corpus.scan.get(source.path) or scan_text(source.text)
+        hits = weighted_hits((lines, is_definition), keywords, rank.definition_weight)
+        damping = max(1.0, len(lines)) ** rank.length_damping
+        weights[source.path] = (hits / damping + 1.0) * (1.0 + boost.get(source.path, 0.0))
+
     total = sum(weights.values()) or 1.0
     return {path: weight / total for path, weight in weights.items()}
 
@@ -360,8 +471,7 @@ def assemble(chunks: list[tuple[str, str]], budget: int) -> tuple[str, int]:
 def recall_of(context: str, needles: list[str]) -> float:
     if not needles:
         return 0.0
-    low = context.lower()
-    return sum(1 for needle in needles if needle.lower() in low) / len(needles)
+    return sum(1 for needle in needles if mentions(context, needle)) / len(needles)
 
 
 # --- stop rules -------------------------------------------------------------
@@ -383,14 +493,13 @@ STOP_RULES: dict[str, int | None] = {
 
 
 def files_holding(corpus: Corpus, needles: list[str]) -> set[str]:
-    """Files containing every needle: reading one of these answers the query."""
-    wanted = [needle.lower() for needle in needles]
-    if not wanted:
+    """Files mentioning every needle: reading one of these answers the query."""
+    if not needles:
         return set()
     return {
         source.path
         for source in corpus.files
-        if all(needle in source.text.lower() for needle in wanted)
+        if all(mentions(source.text, needle) for needle in needles)
     }
 
 
@@ -419,18 +528,17 @@ def simulate_stop(
     return False, used
 
 
-def run_stop(corpus: Corpus, queries: list[dict], budget: int) -> dict[str, dict]:
+def run_stop(
+    corpus: Corpus,
+    prepared: list[tuple[dict, list[str], dict[str, float]]],
+    budget: int,
+) -> dict[str, dict]:
     """Cost of each stopping rule, with the ranking held fixed."""
-    prepared = []
-    for query in queries:
-        keywords = keywords_for(query)
-        prepared.append((query, pagerank(corpus, personalize(corpus, keywords))))
-
     results: dict[str, dict] = {}
     for rule, max_misses in STOP_RULES.items():
         answered = 0
         total_tokens = 0
-        for query, ranked in prepared:
+        for query, _keywords, ranked in prepared:
             found, used = simulate_stop(
                 corpus, ranked, query.get("needles", []), budget, max_misses
             )
@@ -449,9 +557,12 @@ def run_stop(corpus: Corpus, queries: list[dict], budget: int) -> dict[str, dict
 
 
 def report_stop(
-    corpus: Corpus, queries: list[dict], budget: int, as_json: bool
+    corpus: Corpus,
+    prepared: list[tuple[dict, list[str], dict[str, float]]],
+    budget: int,
+    as_json: bool,
 ) -> int:
-    results = run_stop(corpus, queries, budget)
+    results = run_stop(corpus, prepared, budget)
     if as_json:
         print(json.dumps(results, indent=2))
         return 0
@@ -507,29 +618,44 @@ def keywords_for(query: dict) -> list[str]:
     return sorted(set(words + needles)) or [query.get("question", "").lower()]
 
 
-def run(corpus: Corpus, queries: list[dict], budget: int) -> dict[str, dict]:
-    policies = {
-        "read_all": lambda c, r, k, b: chunks_read_all(c),
-        "grep_files": lambda c, r, k, b: chunks_grep(c, k),
-        "pagerank_map": lambda c, r, k, b: chunks_pagerank_map(c, r),
-        "ladder": chunks_ladder,
-    }
-    results: dict[str, dict] = {}
-
-    # Rank once per query, not once per policy: the ranking is the expensive part.
+def prepare(
+    corpus: Corpus, queries: list[dict], rank: Ranking | None = None
+) -> list[tuple[dict, list[str], dict[str, float]]]:
+    """Rank once per query. A budget is not an input, which is what makes a sweep cheap."""
+    rank = rank or Ranking()
     prepared = []
     for query in queries:
         keywords = keywords_for(query)
-        prepared.append((query, keywords, pagerank(corpus, personalize(corpus, keywords))))
+        prepared.append(
+            (query, keywords, pagerank(corpus, personalize(corpus, keywords, rank)))
+        )
+    return prepared
 
-    for name, build in policies.items():
+
+POLICIES = {
+    "read_all": lambda corpus, ranked, keywords, budget: chunks_read_all(corpus),
+    "grep_files": lambda corpus, ranked, keywords, budget: chunks_grep(corpus, keywords),
+    "pagerank_map": lambda corpus, ranked, keywords, budget: chunks_pagerank_map(
+        corpus, ranked
+    ),
+    "ladder": chunks_ladder,
+}
+
+
+def run(
+    corpus: Corpus,
+    prepared: list[tuple[dict, list[str], dict[str, float]]],
+    budget: int,
+) -> dict[str, dict]:
+    results: dict[str, dict] = {}
+    for name, build in POLICIES.items():
         total_recall = 0.0
         total_tokens = 0
         for query, keywords, ranked in prepared:
             context, used = assemble(build(corpus, ranked, keywords, budget), budget)
             total_recall += recall_of(context, query.get("needles", []))
             total_tokens += used
-        count = len(queries) or 1
+        count = len(prepared) or 1
         mean_recall = total_recall / count
         mean_tokens = total_tokens / count
         results[name] = {
@@ -537,8 +663,53 @@ def run(corpus: Corpus, queries: list[dict], budget: int) -> dict[str, dict]:
             "tokens": mean_tokens,
             "recall_per_1k": (mean_recall / (mean_tokens / 1000.0)) if mean_tokens else 0.0,
         }
-
     return results
+
+
+def parse_budgets(spec: str) -> list[int]:
+    budgets = []
+    for part in spec.replace(" ", "").split(","):
+        if not part:
+            continue
+        if not part.isdigit() or int(part) <= 0:
+            raise ValueError(f"not a token budget: {part}")
+        budgets.append(int(part))
+    if not budgets:
+        raise ValueError("--sweep needs at least one budget")
+    return budgets
+
+
+def report_sweep(
+    corpus: Corpus,
+    prepared: list[tuple[dict, list[str], dict[str, float]]],
+    budgets: list[int],
+    as_json: bool,
+) -> int:
+    """One budget is one point, and the winner there can lose at four times the size."""
+    table = {budget: run(corpus, prepared, budget) for budget in budgets}
+    if as_json:
+        print(json.dumps({str(budget): row for budget, row in table.items()}, indent=2))
+        return 0
+    print(f"files: {len(corpus.files)}  queries: {len(prepared)}\n")
+    print("recall per 1k tokens, by budget\n")
+    print("| policy | " + " | ".join(str(b) for b in budgets) + " |")
+    print("| --- |" + " --- |" * len(budgets))
+    for name in table[budgets[0]]:
+        cells = " | ".join(f"{table[budget][name]['recall_per_1k']:.3f}" for budget in budgets)
+        print(f"| {name} | {cells} |")
+    print()
+    for budget in budgets:
+        best = max(table[budget].items(), key=lambda item: item[1]["recall_per_1k"])
+        print(f"  budget {budget:>6}: best recall per 1k = {best[0]}")
+    winners = {
+        max(table[budget].items(), key=lambda item: item[1]["recall_per_1k"])[0]
+        for budget in budgets
+    }
+    if len(winners) > 1:
+        print(f"\nthe winner changes with the budget: {', '.join(sorted(winners))}")
+    else:
+        print(f"\n{next(iter(winners))} wins at every budget tried -- not an artifact of one")
+    return 0
 
 
 def main(argv: list[str]) -> int:
@@ -555,6 +726,14 @@ def main(argv: list[str]) -> int:
         help="compare stopping rules instead of selection policies",
     )
     parser.add_argument(
+        "--sweep",
+        help="comma-separated budgets, e.g. 1000,4000,16000: the winner per budget",
+    )
+    parser.add_argument(
+        "--focus",
+        help="path of the file being edited; ranking favours it and its neighbours",
+    )
+    parser.add_argument(
         "--selftest",
         action="store_true",
         help="run the built-in fixture checks and exit",
@@ -569,13 +748,23 @@ def main(argv: list[str]) -> int:
         print(f"not a directory: {root}", file=sys.stderr)
         return 2
 
+    try:
+        budgets = parse_budgets(args.sweep) if args.sweep else [args.budget]
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+
     corpus = load_corpus(root)
     if not corpus.files:
         print(f"no source files found under {root}", file=sys.stderr)
         return 1
 
     if args.queries:
-        loaded = json.loads(Path(args.queries).read_text(encoding="utf-8"))
+        try:
+            loaded = json.loads(Path(args.queries).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            print(f"cannot read --queries: {error}", file=sys.stderr)
+            return 2
         if not isinstance(loaded, list):
             print("--queries must hold a JSON array", file=sys.stderr)
             return 2
@@ -587,17 +776,27 @@ def main(argv: list[str]) -> int:
         print("no queries: pass --queries or use a corpus with distinctive identifiers", file=sys.stderr)
         return 1
 
-    if args.stop:
-        return report_stop(corpus, queries, args.budget, args.json)
+    rank = Ranking(focus=args.focus)
+    if args.focus and resolve_focus(corpus, args.focus) is None:
+        print(f"--focus {args.focus!r} does not name exactly one file in the corpus", file=sys.stderr)
+        return 2
 
-    results = run(corpus, queries, args.budget)
+    prepared = prepare(corpus, queries, rank)
+
+    if args.stop:
+        return report_stop(corpus, prepared, budgets[0], args.json)
+
+    if args.sweep:
+        return report_sweep(corpus, prepared, budgets, args.json)
+
+    results = run(corpus, prepared, budgets[0])
 
     if args.json:
         print(json.dumps(results, indent=2))
         return 0
 
     print(f"corpus: {root}")
-    print(f"files: {len(corpus.files)}  queries: {len(queries)}  budget: {args.budget} tokens\n")
+    print(f"files: {len(corpus.files)}  queries: {len(queries)}  budget: {budgets[0]} tokens\n")
     print("| policy | recall | tokens | recall/1k |")
     print("| --- | --- | --- | --- |")
     for name, metrics in results.items():
@@ -690,6 +889,34 @@ def selftest() -> int:
 
         window = window_around(SELFTEST_FILES["core.py"], ["refresh_token"])
         checks.append(("window shows the hit line", "refresh_token" in window))
+
+        checks.append(
+            (
+                "needle does not match a longer identifier",
+                not mentions("def refresh_token_legacy(): pass", "refresh_token"),
+            )
+        )
+        checks.append(
+            (
+                "definition outranks usage at equal hits",
+                weighted_hits(
+                    (["def refresh_token():", "x = refresh_token"], [True, False]),
+                    ["refresh_token"],
+                    4.0,
+                )
+                > weighted_hits(
+                    (["x = refresh_token", "y = refresh_token"], [False, False]),
+                    ["refresh_token"],
+                    4.0,
+                ),
+            )
+        )
+        plain = personalize(corpus, ["wqzmconstanttoken"], Ranking(definition_weight=1.0, length_damping=0.0))
+        tuned = personalize(corpus, ["wqzmconstanttoken"], Ranking(definition_weight=4.0))
+        checks.append(("ranking knobs change the prior", plain != tuned))
+        focused = personalize(corpus, [], Ranking(focus="core.py"))
+        checks.append(("focus raises the focused file", focused["core.py"] > focused["noise.py"]))
+        checks.append(("unknown focus resolves to nothing", resolve_focus(corpus, "nope.py") is None))
 
     failed = 0
     for label, passed in checks:

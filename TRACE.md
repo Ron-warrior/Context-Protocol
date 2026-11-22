@@ -144,3 +144,71 @@ this device, so `--selftest`, the four policies and the four stop rules are corr
 by reading, not by running. The next honest step is not a sixth version: it is
 `python3 eval/retrieval_bench.py --selftest` on a machine with a Python, and a
 first real row in the version log that is not an argument.
+
+
+## Trace: v1.6.0–v1.8.0 — the bench audited against its own protocol
+
+Task: keep iterating. The first act of this round was a **full read** of the
+703-line bench, not windowed reads: the change set touched most of the file, so
+windowing would have been the wrong economy (rung 4 is about *which* bytes to read,
+and here the answer was all of them).
+
+### What the full read found
+
+- **Rung 2 was not implemented.** `personalize` counted every keyword occurrence
+  identically. "Definition hit > usage hit", "near the file you are editing >
+  far" and "small > large" appeared in the protocol and were absent from the
+  harness. A ranking rule the bench cannot distinguish cannot be validated by it.
+  This is the most serious finding of the round, and it was in the code since 1.0.0.
+- **Substring matching inflated every policy.** `refresh_token` counted as found
+  inside `refresh_token_legacy`. The inflation applied to all policies equally, so
+  it did not bias the *ranking* between them, but it did inflate recall and the
+  stop-rule answer rate in absolute terms, which is what SCOREBOARD quotes.
+- **A single budget can mislead.** The ladder wins or loses depending on where the
+  cap sits; the protocol's own 4k cap is one point, so a sweep is the only honest
+  test of whether a ranking choice survives.
+
+### Defects this round introduced, and caught
+
+- A stray closing parenthesis in a self-test assertion, caught by read-back before
+  it could run: it would have been a `SyntaxError` on the first `--selftest`.
+- `run_stop` unpacking a 2-tuple from the 3-tuple `prepare` now returns — a crash
+  in `--stop`, the mode the stop-rule hypothesis depends on. Introduced by my own
+  `prepare` refactor in the same turn, caught by reading the region after
+  editing it, not by re-reading the file I had just written.
+
+Both are in the same class as the 1.4.0 defect: the change was correct in the
+region I was thinking about and wrong at the seam with the next region. That is the
+pattern the closing check exists for, and it caught it twice this round.
+
+### Countable units, this round
+
+| Unit | v1.6.0–1.8.0 |
+| --- | --- |
+| calls | ~45 |
+| authored | ~330 lines (bench only) |
+| read-back | the full 703-line file, plus ~400 lines of targeted regions |
+| defects found by read-back | 4 (2 pre-existing, 2 introduced this round) |
+| anything executed | **none** |
+
+### What is still not established
+
+Every improvement in this round is a change to the *instrument*. None of it is a
+measured result. The protocol's claims about which policy wins remain predictions
+until someone runs `--sweep` on a real repository. Notably, the rung-2 knobs are
+now testable, which means a future row can say the ranking clause *lost* — and that
+is the first time the protocol can be wrong about its own ranking rule.
+
+
+### A miss, recorded as one
+
+After claiming the closing check covered `run_stop`, the diff showed the edit had
+deleted the line `found, used = simulate_stop(` and left a bare argument list: a
+`SyntaxError` in `--stop`. The region had been read back *before* the diff, and
+the read did not catch it because I read the region and then edited a second time
+without reading again. The last operation on that region was a write, so rung 6(a)
+was violated in exactly the way the 1.1.0 rule was written to prevent.
+
+Fixed, and read back again. The defect count for the round is therefore 5, not 4,
+and the lesson is narrower than "read more": **a read is only a check if it is the
+last operation on the region.** Any edit after the read reopens the region.
