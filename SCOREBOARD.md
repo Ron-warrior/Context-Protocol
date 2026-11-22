@@ -192,3 +192,32 @@ that survived a read-back. The bench has its own version track from 1.4.0 on,
 because it changed and the protocol did not. Rows 1.6.0–1.10.0 are bench
 versions; they do not bump the protocol, and no rule in README.md changed to
 justify one. A protocol bump needs a rule that changed.
+
+
+## Product numbers (`ctx`, not the research harness)
+
+First measured output of the shipped tool. Corpus: freellmapi, 795 files,
+10 auto-generated queries, budget 4000 tokens per query.
+
+| policy | recall | tokens | ms |
+| --- | --- | --- | --- |
+| intelligence (default) | 0.800 | 3493 | 143.9 |
+| lean (`--lean`) | 0.700 | 2990 | 127.3 |
+
+**Intelligence-first: +0.100 recall for +503 tokens.** On this corpus the
+enclosing-body, call-site and co-occurrence work paid for itself — the tool got
+better at answering, not just at compressing.
+
+**Two cautions, both real:**
+
+- `read_all` and `grep` scored 1.000 because that run reported
+  `min(tokens(emitted), budget)`. They dump the corpus and the column capped the
+  cost. Fixed in 2.5.0; the table above is unaffected by that bug, but the run it
+  came from also printed a misleading winner.
+- Ten queries is not enough to separate 0.1 recall from noise. CI now runs 25
+  queries on three corpora (this repo, the 795-file TypeScript one, and
+  graphify's own Python source). Those numbers are not in yet.
+
+What would retire the intelligence-first default: if it fails to beat `--lean` on
+recall across the larger runs, the extra tokens buy nothing and the phases that
+cost them come out.
