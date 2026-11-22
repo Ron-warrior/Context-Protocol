@@ -68,7 +68,12 @@ jobs:
       - name: Compile
         run: python3 -m py_compile ctx.py
       - name: Version
-        run: python3 ctx.py --version
+        run: |
+          set -euo pipefail
+          python3 ctx.py --version
+          # The stamp drifts when versions are bumped by hand; catch it.
+          grep -q '__version__ = "' ctx.py
+          grep -q "Version: 2\." README.md
       - name: Self-test
         run: python3 ctx.py selftest
       # Measurement comes before installation on purpose. Twice now the install

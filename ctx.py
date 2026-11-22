@@ -48,7 +48,7 @@ TEXT_EXT = {
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "2.6.0"
+__version__ = "2.12.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",

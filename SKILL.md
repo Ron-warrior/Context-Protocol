@@ -65,10 +65,12 @@ ctx plan                             # the ladder as a checklist, no install nee
 ctx selftest                         # fixtures; exit 0 means it works
 ```
 
-`ctx query` emits, in this order: the enclosing block of each match (the answer),
-a signature map of ranked files, blocks from lower-ranked matches, one hop of
-imports, and call sites of what it found. It never reads a file it has no reason
-to read, and `.gitignore` plus `.ctxrc` (`budget=`, `expand=off`) are honoured.
+`ctx query` emits, in this order: the enclosing body of each of the top three
+matches, the enclosing bodies of ranks four to ten, then a signature map of every
+ranked file, then one hop of imports, then call sites of what it found. Bodies
+before maps, because an outline tells you a name exists while a body answers the
+question. It never reads a file it has no reason to read, and `.gitignore` plus
+`.ctxrc` (`budget=`, `expand=off`) are honoured.
 
 ## Mode 3 — measure before you trust
 
