@@ -117,6 +117,39 @@ rule are free, and worth more than most of the software in this document.
 | **graphify** | AST + Leiden communities + static graph | Deterministic, free, explained, shareable, multimodal | Static, query-agnostic, `recall@10 0.497`, loses QA to supermemory | **Keep as the map layer, not the retrieval layer.** |
 | **Vector RAG / mem0 / supermemory** | embeddings over chunks | Recall of fuzzy facts (`0.149` / `0.048` @10) | Structure and exactness; chunk boundaries; staleness | **Worst fit for code. Skip.** |
 
+## Measured since this document was written
+
+Every number above is someone else's self-report. The bench (`eval/retrieval_bench.py`)
+now measures the claims on a real repository (freellmapi, 795 files, 25
+rare-identifier auto queries, CI run 45074848996), and two verdicts gained nuance:
+
+**The repo-map idea, measured.** `pagerank_map` is this project's implementation
+of the aider claim — signature outlines ranked by personalized PageRank over the
+import graph, nothing else. Recall per 1k tokens:
+
+| policy | 1,000 | 4,000 | 16,000 |
+| --- | --- | --- | --- |
+| read_all | 0.000 | 0.000 | 0.003 |
+| grep_files | 0.000 | 0.108 | 0.040 |
+| pagerank_map | 0.121 | 0.070 | 0.023 |
+| **ladder** (map + scoped windows) | **0.567** | **0.213** | **0.058** |
+
+- On seven files the map ranked *worst*, below grep — an artifact of a corpus
+  with almost no import edges. On the real corpus it recovers at 1k (0.121 vs
+  grep's 0.000), which is the first evidence that PageRank over dependencies
+  buys anything at all. The "best single idea" verdict stands, narrowed: **the
+  map narrows the search, the scoped windows win it.** Map alone loses to the
+  full ladder at every budget, 4.7x at 1k.
+- The stop-rule experiment measured the other half of finding 4. Chunk-level
+  reads, ranking fixed (run 45075205417): `until_found` answers 68% of queries
+  at 2,404 tokens; `two_strike` answers 16% at 817. **Quitting early is
+  expensive in answers, not cheap** — 0.197 answers per 1k against 0.283. The
+  two-strike rule survives only in its original form: two misses mean *change
+  rung* (search for the definition, not the usage), not *give up*.
+
+Both results are one corpus and one query shape (rare identifiers). They are
+the first measured evidence in this document, not the last word.
+
 ## The composition nobody ships
 
 graphify's extracted edges are precisely the input a PageRank needs. It builds the
