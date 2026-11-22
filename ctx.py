@@ -520,19 +520,24 @@ def recall_of(context: str, needles: list[str]) -> float:
     return sum(1 for needle in needles if needle.lower() in low) / len(needles)
 
 
-def auto_queries(files: list[Source], count: int, seed: int = 0) -> list[dict]:
+def auto_queries(files: list[Source], count: int, seed: int = 0, rare: int = 2) -> list[dict]:
+    """Questions built from identifiers that appear in at most `rare` files.
+
+    rare=1 is the hard case and the realistic one: a fact that exists in exactly
+    one place. rare=2 is easier, because a second mention is a second chance.
+    """
     where: dict[str, set[str]] = {}
     for source in files:
         for ident in set(IDENT_RE.findall(source.text)):
             where.setdefault(ident, set()).add(source.path)
-    rare = sorted(
+    candidates = sorted(
         ident for ident, paths in where.items()
-        if len(paths) <= 2 and ident.lower() not in STOPWORDS
+        if len(paths) <= rare and ident.lower() not in STOPWORDS
     )
-    if not rare:
+    if not candidates:
         return []
-    random.Random(seed).shuffle(rare)
-    return [{"question": ident, "needles": [ident]} for ident in rare[:count]]
+    random.Random(seed).shuffle(candidates)
+    return [{"question": ident, "needles": [ident]} for ident in candidates[:count]]
 
 
 def load_rc(root: Path) -> dict[str, str]:
@@ -684,7 +689,7 @@ def cmd_bench(args) -> int:
     if not files:
         print("no source files", file=sys.stderr)
         return 1
-    queries = auto_queries(files, args.queries, args.seed)
+    queries = auto_queries(files, args.queries, args.seed, args.rare)
     if not queries:
         print("no queries generated", file=sys.stderr)
         return 1
@@ -936,6 +941,10 @@ def main(argv: list[str] | None = None) -> int:
     p_bench.add_argument("--queries", type=int, default=25)
     p_bench.add_argument("--budget", type=int, default=4000)
     p_bench.add_argument("--seed", type=int, default=0)
+    p_bench.add_argument(
+        "--rare", type=int, default=2,
+        help="needles appear in at most this many files; 1 is the hard case",
+    )
     p_bench.add_argument("--json", action="store_true", help="machine-readable results")
     p_bench.set_defaults(func=cmd_bench)
 
