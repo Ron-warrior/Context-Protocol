@@ -1,5 +1,9 @@
 # Findings: what is actually more effective than graphify, and why
 
+**Why this project exists.** To replace graphify with something measurably better —
+judged on answers per token, not tokens alone. That difference is not a matter of
+taste: it is visible in graphify's own benchmark source, below.
+
 Short version: **graphify's real invention is the cheap, deterministic map. Its
 weakness is that it stops there.** It builds a graph and hands you a browser; it
 never spends the graph on the one thing that decides effectiveness — choosing
@@ -170,3 +174,63 @@ project does, with no install and no rebuild.
 - Serena — LSP-backed semantic retrieval over MCP: `github.com/oraios/serena`
 - Anthropic, *Effective context engineering for AI agents* — just-in-time
   retrieval, compaction, note-taking, sub-agents: `anthropic.com/engineering/effective-context-engineering-for-ai-agents`
+
+
+## The 71.5x, read from source
+
+Cloned `Graphify-Labs/graphify` at `3671f31` (release v0.9.115) and read
+`graphify/benchmark.py`. The headline token-reduction number is computed like this:
+
+```python
+# graphify/benchmark.py:75-79
+if corpus_words is None:
+    # Rough estimate: each node label is ~3 words, plus source context
+    corpus_words = G.number_of_nodes() * 50
+
+corpus_tokens = corpus_words * 100 // 75  # words → tokens
+```
+
+and then, at line 92:
+
+```python
+reduction_ratio = round(corpus_tokens / avg_query_tokens, 1)
+```
+
+So "71.5x fewer tokens per query" is:
+
+> *(node count × 50 × 4/3)* ÷ *the token count of `query_graph`'s own output*
+
+The numerator is an **estimate invented from the graph's node count**, not the
+measured size of the corpus. The denominator is the tool's own output. Two numbers
+from the same artifact, divided.
+
+**And nothing in the file checks whether the answer is in that output.** The only
+filter is `if qt > 0` — non-empty. A query that returns four hundred confident
+tokens of the wrong nodes scores exactly as well as one that returns the answer.
+
+That is the flaw this project is built against:
+
+> **A tiny answer that is wrong is not efficient. It is cheap.**
+
+Compression is a property of the output. Effectiveness is whether the output
+contains what was asked for. graphify measures the first and reports it as if it
+were the second — and the baseline it beats is itself an estimate, so neither side
+of the ratio is a measurement of retrieval.
+
+### What we measure instead
+
+`eval/retrieval_bench.py` scores **needle recall per 1k tokens**: does the returned
+context contain the fact that decides the question, per token spent. That metric can
+*disagree* with compression — a policy can win on tokens and lose on recall — which
+is exactly what makes it useful.
+
+`eval/compare_graphify.py` applies the same metric to graphify's real
+`query_graph` output, on the same corpus and the same needles. No estimation, no
+proxy: the number graphify's own benchmark cannot produce, computed against the
+thing it actually returns.
+
+### What would falsify us
+
+If graphify's query output beats the ladder on recall per 1k on the corpus, then the
+claim in this file is wrong and the protocol loses honestly. The comparison script
+prints both; it does not assume which wins.

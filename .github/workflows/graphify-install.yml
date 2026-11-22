@@ -77,3 +77,53 @@ jobs:
               sys.exit("FAIL: zero nodes extracted")
           print("PASS: graph built and parsed")
           PY
+
+
+  head-to-head:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check out the corpus
+        uses: actions/checkout@v4
+        with:
+          repository: tashfeenahmed/freellmapi
+          fetch-depth: 1
+          sparse-checkout: |
+            server/src
+            shared
+            cli
+          path: corpus
+      - name: Install graphify
+        run: |
+          set -euxo pipefail
+          python3 -m venv .venv-graphify
+          source .venv-graphify/bin/activate
+          pip install --quiet "graphifyy==0.9.115"
+          graphify --version
+      - name: Build graphify's graph over the corpus
+        run: |
+          set -euo pipefail
+          source .venv-graphify/bin/activate
+          cd corpus
+          GRAPHIFY_BACKEND=none graphify extract . --code-only
+          ls -la graphify-out/graph.json
+      - name: Ladder on the same corpus
+        run: |
+          set -euo pipefail
+          source .venv-graphify/bin/activate
+          python3 eval/retrieval_bench.py corpus --auto 25 --sweep 4000
+      - name: graphify query, scored the same way
+        run: |
+          set -euo pipefail
+          source .venv-graphify/bin/activate
+          python3 eval/compare_graphify.py corpus corpus/graphify-out/graph.json --queries 25
+      - name: graphify's own benchmark, for comparison
+        run: |
+          set -euo pipefail
+          source .venv-graphify/bin/activate
+          cd corpus
+          python3 -c "from graphify.benchmark import run_benchmark, print_benchmark; print_benchmark(run_benchmark())"
