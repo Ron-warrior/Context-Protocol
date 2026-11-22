@@ -94,15 +94,18 @@ class Source:
     text: str
     symbols: set[str] = field(default_factory=set)
     lines: list[str] = field(default_factory=list)
+    lowered: list[str] = field(default_factory=list)
     low: str = ""
 
     def __post_init__(self) -> None:
-        # Split and lowercase once per file rather than once per query: ranking
-        # touches every file, and speed is the third objective but it is free here.
+        # Split and lowercase once per file rather than once per query: ranking and
+        # the hit scanners touch every line of every file on every question.
         if not self.lines:
             self.lines = self.text.splitlines()
         if not self.low:
             self.low = self.text.lower()
+        if not self.lowered:
+            self.lowered = [line.lower() for line in self.lines]
 
 
 def tokens(text: str) -> int:
@@ -246,9 +249,8 @@ def outline(source: Source) -> list[str]:
 
 def hit_lines(source: Source, words: list[str]) -> list[int]:
     hits: list[int] = []
-    for index, line in enumerate(source.lines):
-        low = line.lower()
-        if any(word in low for word in words):
+    for index, low_line in enumerate(source.lowered):
+        if any(word in low_line for word in words):
             hits.append(index)
     return hits
 
@@ -261,12 +263,11 @@ def best_hit_lines(source: Source, words: list[str], limit: int = 2) -> list[int
     ties fall back to the earlier line.
     """
     scored: list[tuple[int, int, int]] = []
-    for index, line in enumerate(source.lines):
-        low = line.lower()
-        distinct = sum(1 for word in words if word in low)
+    for index, low_line in enumerate(source.lowered):
+        distinct = sum(1 for word in words if word in low_line)
         if not distinct:
             continue
-        bonus = 2 if DEF_RE.match(line) else 0
+        bonus = 2 if declaration_name(source.lines[index]) else 0
         scored.append((distinct + bonus, -index, index))
     scored.sort(reverse=True)
     return [index for _score, _neg, index in scored[:limit]]
@@ -318,8 +319,7 @@ def rank(files: list[Source], words: list[str]) -> list[tuple[float, Source]]:
             continue
         hits = 0
         co_occur = 0
-        for line in source.lines:
-            low_line = line.lower()
+        for low_line in source.lowered:
             present = sum(1 for word in words if word in low_line)
             if present:
                 hits += present
