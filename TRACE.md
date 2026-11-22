@@ -284,3 +284,52 @@ The stop-rule hypothesis still has no valid number: chunk-level `--stop` has
 not run yet, and its CI run is the next evidence either way. The ladder's 0.567
 at 1k comes from auto-generated rare-identifier queries — real questions have
 synonyms and paraphrases, and the protocol has no instrument for that yet.
+
+
+## Trace: the stop experiment gets a real number, then corrects itself
+
+Two CI runs, one iteration chain: 1.10.0's fix produced the first valid stop
+numbers, and the numbers themselves exposed the next instrument defect.
+
+Run 45075205417 (bench 1.10.0, chunk-level walk):
+
+| stop rule | answer rate | tokens | tokens/answer |
+| --- | --- | --- | --- |
+| until_found | 0.680 | 2,404 | 3,536 |
+| three_strike | 0.200 | 1,035 | 5,176 |
+| two_strike | 0.160 | 817 | 5,106 |
+| one_strike | 0.000 | 524 | inf |
+
+Two findings, one falsification:
+
+1. **The quit-form of the stop-rule hypothesis is falsified.** Strikes do not
+   hold answer rate: two_strike trades 52 points of it for two thirds of the
+   tokens and loses on answers per 1k (0.197 vs 0.283). Quitting early is
+   expensive in answers, not cheap. README's two-strike rule survives because
+   it was never the quit rule — it says *change rung* after two misses.
+2. **The strike costs exposed a second artifact.** one_strike spent 524 tokens
+   and answered 0% — it died during the outline phase, before any window. A
+   rule that counts outline reads as strikes is measuring the map, which
+   cannot answer a body question, not the stopping.
+
+Bench 1.11.0 re-counts strikes over scoped windows only (rung 4's reads; rung
+3's map burns none), with a fifth fixture whose needle lives in a lower-ranked
+body so the one-strike path is actually exercised. Prediction recorded in
+SCOREBOARD before the run: strike answer rates rise toward until_found's 68%,
+and three_strike may then challenge it on answers per 1k.
+
+### Countable units, this round
+
+| Unit | this round |
+| --- | --- |
+| calls | ~12 |
+| authored | ~55 lines (bench, scoreboard, trace) |
+| read-back | every edited region; caller sweep over `excerpt` literals |
+| defects found | 1 (outline-strike artifact, found by the numbers 1.10.0 produced) |
+| executed | CI: selftest, real-corpus sweep, stop mode |
+
+### What is still not established
+
+Whether any strike rule beats until_found per token — the 1.11.0 run decides.
+And the ladder's margins are still measured on auto-generated rare-identifier
+queries; a synonym-tolerant query generator is the next instrument gap.

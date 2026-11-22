@@ -76,6 +76,7 @@ TEXT_EXT = {
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 FALLBACK_OUTLINE_LINES = 12
+WINDOW_SUFFIX = " (excerpt)"
 
 STOPWORDS = {
     "return", "import", "public", "private", "static", "string", "number",
@@ -447,10 +448,10 @@ def chunks_ladder(
         snippet = window_around(source.text, keywords)
         if not snippet:
             continue
-        cost = chunk_cost(f"{source.path} (excerpt)", snippet)
+        cost = chunk_cost(f"{source.path}{WINDOW_SUFFIX}", snippet)
         if used + cost > budget:
             continue
-        chunks.append((f"{source.path} (excerpt)", snippet))
+        chunks.append((f"{source.path}{WINDOW_SUFFIX}", snippet))
         used += cost
 
     return chunks
@@ -490,9 +491,12 @@ def recall_of(context: str, needles: list[str]) -> float:
 # four rules and a 4% answer rate. That result measured read granularity, not
 # stopping. A 40-line window costs a fraction of what a whole file does.
 #
-# A miss is a chunk read that did not contain the needle -- the same proxy the
-# recall metric uses. Every rule is additionally bounded by the token budget, so
-# "never stop" is still finite and comparable.
+# A strike is a scoped window read that did not contain the needle -- the same
+# proxy the recall metric uses, counted only over rung 4's reads. Outline
+# chunks are the map (rung 3) and burn no strikes: 1.10.0 counted them, and on
+# the real corpus every strike rule then quit during the outline phase at
+# 0-20% answer rate against until_found's 68%. Every rule is additionally
+# bounded by the token budget, so "never stop" is still finite and comparable.
 
 STOP_RULES: dict[str, int | None] = {
     "until_found": None,
@@ -522,7 +526,8 @@ def simulate_stop(
     max_misses: int | None,
 ) -> tuple[bool, int]:
     """Read the ladder's chunks in order until answered, out of strikes, or out
-    of budget. A miss is one chunk read that did not contain the needles."""
+    of budget. A strike is a scoped window read that did not contain the
+    needles; outline chunks are the map (rung 3) and burn none."""
     if not needles:
         return False, 0
     chunks = chunks_ladder(corpus, ranked, keywords, budget)
@@ -537,7 +542,13 @@ def simulate_stop(
         used += cost
         if all(mentions(text, needle) for needle in needles):
             return True, used
-        misses += 1
+        # 1.10.0 counted every non-answering chunk as a strike, and on the
+        # real corpus every strike rule quit during the outline phase -- the
+        # map cannot answer a body question, so that miss definition measured
+        # the map, not the stopping. README's two-strike governs answering
+        # reads (rung 4); outlines are rung 3 and burn none.
+        if path.endswith(WINDOW_SUFFIX):
+            misses += 1
         if max_misses is not None and misses >= max_misses:
             break
     return False, used
@@ -853,6 +864,10 @@ def run():
 def unrelated_thing():
     return 0
 """,
+    "store.py": """
+def save():
+    return "ZqvBodyNeedleToken"
+""",
 }
 
 
@@ -907,20 +922,29 @@ def selftest() -> int:
         )
         checks.append(("a budget wall stops even that rule", not walled))
 
-        # ZxqvNeedleToken lives in a method body, not in any outline, so the
-        # first chunk -- the top-ranked file's outline -- is a miss. One strike
-        # must quit before the window that answers; until_found must read on
-        # and reach it, paying more for the privilege.
+        # Outlines are the map (rung 3), not answering reads (rung 4), so
+        # they must not burn strikes. ZxqvNeedleToken lives in core.py's
+        # body, which ranks top for its own name: every outline chunk is a
+        # miss and 1.10.0's one-strike quit there. It must still answer.
         ranked_body = pagerank(corpus, personalize(corpus, ["zxqvneedletoken"]))
-        quit_early, used_early = simulate_stop(
+        survived_outline, _ = simulate_stop(
             corpus, ranked_body, ["zxqvneedletoken"], ["ZxqvNeedleToken"], 100_000, 1
         )
-        checks.append(("one strike quits on a missed chunk", not quit_early))
-        kept_reading, used_full = simulate_stop(
-            corpus, ranked_body, ["zxqvneedletoken"], ["ZxqvNeedleToken"], 100_000, None
+        checks.append(("outline misses do not burn strikes", survived_outline))
+
+        # ZqvBodyNeedleToken lives in store.py's body, but "token" ranks
+        # core.py first, so the first window is a miss. One strike quits
+        # there; until_found reads on and answers in store.py's window.
+        ranked_token = pagerank(corpus, personalize(corpus, ["token"]))
+        quit_one, used_one = simulate_stop(
+            corpus, ranked_token, ["token"], ["ZqvBodyNeedleToken"], 100_000, 1
         )
-        checks.append(("until_found reads on and answers", kept_reading))
-        checks.append(("striking out costs less than reading on", used_early < used_full))
+        checks.append(("one strike quits after one missed window", not quit_one))
+        kept_reading, used_kept = simulate_stop(
+            corpus, ranked_token, ["token"], ["ZqvBodyNeedleToken"], 100_000, None
+        )
+        checks.append(("until_found reads past a missed window and answers", kept_reading))
+        checks.append(("striking out costs less than reading on", used_one < used_kept))
 
         window = window_around(SELFTEST_FILES["core.py"], ["refresh_token"])
         checks.append(("window shows the hit line", "refresh_token" in window))

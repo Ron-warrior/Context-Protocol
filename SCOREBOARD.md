@@ -49,6 +49,7 @@ Policies compared, in one pass, at the same budget:
 | 1.8.0 | Bench: `run_stop` unpacked a 2-tuple from the 3-tuple `prepare` now returns (would have crashed `--stop`); `--queries` load errors reported cleanly; `--sweep` and `--focus` validated in `main` | Read-back of the 1.6.0 region after the edit found the crash. Caller sweep then covered every changed signature | Kept |
 | 1.9.0 | `report_stop` printed an undefined `queries` (crash on `--stop`); `tokens_per_answer` reports `inf` instead of a flattering `0` when a rule answers nothing; CI workflow compiles, self-tests and smoke-runs every mode | CI run 45064682765. The undefined name had survived an explicit read-back of its own region — reading a line is not checking a line | Kept |
 | 1.10.0 | Bench: `--stop` walks the ladder's scoped chunks (outlines, then windows) instead of whole files; a miss is one chunk read without the needle; three new self-test assertions (20 total) | Real-corpus run 45074848996 (795 files): three of four stop rules returned identical tokens (3,042 per query) at a 4% answer rate — whole-file reads hit the 4k wall before any strike rule could fire, so the experiment measured read granularity, not stopping. Chunk-level reads are what rung 4 prescribes | Kept |
+| 1.11.0 | Bench: strikes count only scoped windows, not outlines — rung 4's reads govern the stop rule, rung 3's map burns none; fifth fixture whose needle lives in a lower-ranked body; three self-test assertions rewritten for the new semantics (20 total) | Run 45075205417: until_found 68% at 2,404 tokens (best answers/1k, 0.283); strike rules died in the outline phase (one_strike 524 tokens, 0% — the map cannot answer a body question). Falsifiable prediction: strike answer rates rise toward until_found; three_strike may then challenge it per token | Pending |
 
 ## First measured results
 
@@ -101,12 +102,23 @@ What this says:
   (0.121 vs 0.000), which it never did on seven files — that import graph was
   too sparse for PageRank to say anything. But it still loses to the ladder at
   every budget: a map narrows the search, the scoped windows win it.
-- **The stop-rule table from this run is a result about the instrument, not
-  about stop rules**, and is recorded as such rather than quoted: three of four
-  rules returned identical tokens (3,042 per query) at a 4% answer rate because
-  whole-file reads hit the budget wall before any strike rule could fire. Bench
-  1.10.0 rewrites `--stop` over the ladder's chunks; the next run's numbers
-  replace this.
+- **The first valid stop-rule numbers** (bench 1.10.0, chunk-level walk, 25
+  queries, budget 4k):
+
+  | stop rule | answer rate | tokens | tokens/answer |
+  | --- | --- | --- | --- |
+  | until_found | 0.680 | 2,404 | 3,536 |
+  | three_strike | 0.200 | 1,035 | 5,176 |
+  | two_strike | 0.160 | 817 | 5,106 |
+  | one_strike | 0.000 | 524 | inf |
+
+  `until_found` wins answers per 1k (0.283). The quit-form of the stop-rule
+  hypothesis is **falsified**: strikes do not hold answer rate, they trade 52
+  points of it for 2/3 of the tokens and lose on both ratios. But the strike
+  costs themselves expose a second instrument artifact — one_strike at 524
+  tokens means it quit *during the outline phase*, and the map cannot answer a
+  body question. Counting outline misses as strikes measured the map, not the
+  stopping. Bench 1.11.0 counts strikes over scoped windows only.
 
 Later versions append a row. Reverted changes stay in the table, marked reverted,
 with the number that killed them. Deleting a failed change hides the only thing
@@ -145,10 +157,14 @@ Queued, not yet tested. Cheap to test, so test them rather than arguing:
   rather than asking the reader to spot it. Adopted in rung 6 on arithmetic, not on
   measurement: testable by replaying a trace both ways and counting defects found
   per 1k tokens. If it loses, it goes.
-- **The stop rule may matter more than the ranking.** `--stop` now measures answer
-  rate against tokens for four stopping rules; if `two_strike` holds answer rate
-  while spending materially fewer tokens than `until_found`, the cheapest upgrade
-  left in this protocol is a stop rule, not a better map.
+- **The stop rule may matter more than the ranking.** First valid numbers (real
+  corpus, chunk-level, 1.10.0): until_found 68% answers at 2,404 tokens — best
+  answers per 1k (0.283); two_strike 16% at 817. **Falsified in its quit-form:**
+  strikes do not hold answer rate; quitting early is expensive in answers, not
+  cheap. Note this does not indict README's two-strike rule, which says *change
+  rung* after two misses, not *quit* — the data supports that reading. 1.11.0
+  re-counts strikes over windows only (outlines are the map and burn none); its
+  CI run decides whether any strike rule beats until_found per token.
 - **Persisted notes beat a rebuilt index** for repos under ~50k LOC, because
   re-derivation is cheap there and index staleness is not. Unchanged.
 - **Cross-file rename is where text-level tools lose hardest** — the one case where
