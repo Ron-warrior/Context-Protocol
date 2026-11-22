@@ -8,7 +8,7 @@ This is the root README on purpose. It is the only file loaded into every chat o
 this project, so it is the only place a rule can live and actually take effect.
 Everything else is loaded on demand — which is also rung 1.
 
-Version: 2.15.0 — the objective is ordered: intelligence, then tokens, then speed
+Version: 2.16.0 — the objective is ordered: intelligence, then tokens, then speed
 
 ---
 

@@ -48,7 +48,7 @@ TEXT_EXT = {
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "2.15.0"
+__version__ = "2.16.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -302,17 +302,26 @@ def numbered(text: str, start: int, end: int) -> str:
     return "\n".join(f"{start + i + 1}: {line[:200]}" for i, line in enumerate(lines))
 
 
-def rank(files: list[Source], words: list[str]) -> list[tuple[float, Source]]:
+def rank(
+    files: list[Source], words: list[str], phrase: str = ""
+) -> list[tuple[float, Source]]:
     """Score by evidence the answer is here, not by how cheap the file is.
 
-    - symbol match: a query word is part of a declared name (strongest signal)
+    - exact phrase: the whole query string appears verbatim (strongest signal)
+    - symbol match: a query word is part of a declared name
     - co-occurrence: two distinct query words on one line (the relation asked about)
     - raw hits: how often the words appear at all
     Length damping stays as a weak prior: a huge file mentioning a word once is
     usually not the answer.
+
+    The phrase boost exists because diagnosis showed missed answers sitting at a
+    median rank of 40: their files matched the *parts* of an identifier but were
+    outscored by files full of generic occurrences of one part.
     """
     if not words:
         return []
+    phrase_low = (phrase or "").strip().lower()
+    use_phrase = len(phrase_low) > 3
     scored: list[tuple[float, Source]] = []
     for source in files:
         if not any(word in source.low for word in words):
@@ -327,6 +336,8 @@ def rank(files: list[Source], words: list[str]) -> list[tuple[float, Source]]:
                     co_occur += 1
         symbol_hits = sum(1 for word in words if word in source.symbols)
         score = (hits + 4 * symbol_hits + 3 * co_occur) / (1.0 + len(source.text) / 4000.0)
+        if use_phrase and phrase_low in source.low:
+            score *= 3.0
         scored.append((score, source))
     scored.sort(key=lambda item: (-item[0], item[1].path))
     return scored
@@ -405,9 +416,10 @@ def build_context(
     budget: int,
     expand: bool = True,
     index: dict[str, list[str]] | None = None,
+    phrase: str = "",
 ):
     """Intelligence first, then cost. Returns (text, tokens_used, chunks)."""
-    ranked = rank(files, words)
+    ranked = rank(files, words, phrase)
     if not ranked:
         return "", 0, 0
 
@@ -513,9 +525,9 @@ def build_context(
     return header + body, used, len(chunks)
 
 
-def build_context_lean(files: list[Source], words: list[str], budget: int):
+def build_context_lean(files: list[Source], words: list[str], budget: int, phrase: str = ""):
     """Token-first baseline: map within 40% of the budget, then short windows."""
-    ranked = rank(files, words)
+    ranked = rank(files, words, phrase)
     head = max(1, int(budget * 0.4))
     used = 0
     chunks: list[tuple[str, str]] = []
@@ -618,7 +630,7 @@ def cmd_query(args) -> int:
     if getattr(args, "rank_only", False):
         # The ranking without the content: for an agent that wants to choose its
         # own reads, or a human checking that the question is even landing.
-        ranked = rank(files, words)
+        ranked = rank(files, words, args.question)
         if not ranked:
             print(f"no match for {args.question!r} in {len(files)} files", file=sys.stderr)
             return 0
@@ -629,7 +641,7 @@ def cmd_query(args) -> int:
 
     if getattr(args, "explain", False):
         print("rank (score  path)", file=sys.stderr)
-        for score, source in rank(files, words)[:5]:
+        for score, source in rank(files, words, args.question)[:5]:
             print(f"{score:8.2f}  {source.path}", file=sys.stderr)
     started = time.perf_counter()
     rc = load_rc(Path(args.path))
@@ -638,9 +650,11 @@ def cmd_query(args) -> int:
     if rc.get("expand", "").lower() in {"off", "false", "0", "no"}:
         expand = False
     if args.lean:
-        body, used, chunks = build_context_lean(files, words, budget)
+        body, used, chunks = build_context_lean(files, words, budget, args.question)
     else:
-        body, used, chunks = build_context(files, words, budget, expand=expand)
+        body, used, chunks = build_context(
+            files, words, budget, expand=expand, phrase=args.question
+        )
     elapsed = (time.perf_counter() - started) * 1000
 
     if not body.strip():
@@ -730,26 +744,26 @@ def cmd_bench(args) -> int:
         print("no queries generated", file=sys.stderr)
         return 1
 
-    def read_all(_words):
+    def read_all(_words, _phrase):
         body = "\n\n".join(f"### {s.path}\n{s.text}" for s in files)
         return body, tokens(body)
 
-    def grep(words):
+    def grep(words, _phrase):
         body = "\n\n".join(
             f"### {s.path}\n{s.text}" for s in files
             if any(w in s.text.lower() for w in words)
         )
         return body, tokens(body)
 
-    def lean(words):
-        return build_context_lean(files, words, args.budget)[:2]
+    def lean(words, phrase):
+        return build_context_lean(files, words, args.budget, phrase)[:2]
 
     # Inverted once per run, not per query: call_sites would otherwise rescan the
     # whole corpus for every question.
     index = symbol_index(files)
 
-    def intelligence(words):
-        return build_context(files, words, args.budget, index=index)[:2]
+    def intelligence(words, phrase):
+        return build_context(files, words, args.budget, index=index, phrase=phrase)[:2]
 
     policies = {
         "read_all": read_all,
@@ -771,7 +785,8 @@ def cmd_bench(args) -> int:
         over = 0
         started = time.perf_counter()
         for query in queries:
-            context, used = build(words_of(query["needles"][0]))
+            needles = query["needles"]
+            context, used = build(words_of(needles[0]), needles[0])
             total_tokens += used
             if used > args.budget:
                 over += 1
@@ -816,7 +831,7 @@ def cmd_bench(args) -> int:
         for query in queries:
             needles = query["needles"]
             words = words_of(needles[0])
-            context, _used = intelligence(words)
+            context, _used = intelligence(words, needles[0])
             if recall_of(context, needles) >= 1.0:
                 continue
             missed += 1
@@ -824,7 +839,7 @@ def cmd_bench(args) -> int:
             if not holders:
                 missing_file += 1
                 continue
-            ranked_list = [source.path for _score, source in rank(files, words)]
+            ranked_list = [source.path for _score, source in rank(files, words, needles[0])]
             ranked_paths = set(ranked_list)
             hit = [path for path in holders if path in ranked_paths]
             if not hit:
