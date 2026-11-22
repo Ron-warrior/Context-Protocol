@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Benchmark scratch output
+eval/graphify-out/
+eval/*.out
+eval/results*.json
+
+# OS and editors
+.DS_Store
+.idea/
+.vscode/
+
+# Local overrides
+*.local

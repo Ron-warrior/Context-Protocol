@@ -1,0 +1,139 @@
+# Findings: what is actually more effective than graphify, and why
+
+Short version: **graphify's real invention is the cheap, deterministic map. Its
+weakness is that it stops there.** It builds a graph and hands you a browser; it
+never spends the graph on the one thing that decides effectiveness — choosing
+which tokens go into the next turn under a budget. That ranking step is where the
+state of the art is better, and it is the step this project's protocol takes.
+
+## What graphify is
+
+A `/graphify` skill (Claude Code, Cursor, Codex, Gemini, ~20 more) that turns a
+folder into a knowledge graph: tree-sitter AST for ~40 languages, no LLM for
+code, Leiden communities, every edge tagged `EXTRACTED` / `INFERRED` /
+`AMBIGUOUS`, `graph.json` + `graph.html` + `GRAPH_REPORT.md`, then `query` /
+`path` / `explain` against it, plus an MCP server and git hooks.
+
+Genuinely good, and worth keeping:
+
+- **Deterministic code parsing.** No embeddings, no vector store, no drift. A file
+  parses the same way twice, offline, for free.
+- **Explained edges.** `EXTRACTED` vs `INFERRED` is the right answer to "the graph
+  is wrong sometimes" — it tells you which edges you may trust.
+- **A shared artifact.** The graph is a file your team and your agents can both
+  read, versionable in git.
+- **Multimodal ingestion.** PDFs, images, video into the same graph.
+
+## Where it loses
+
+1. **The 71.5x is measured against a strawman.** The baseline is "reading the raw
+   files" — a 52-file mixed corpus read whole. No competent agent does that; it
+   greps, then reads three files. Against an agent that already maps before it
+   reads, the multiplier collapses toward the low single digits. Token savings
+   measured against the worst possible baseline flatter the method.
+2. **Retrieval quality has a hard ceiling.** Self-reported LOCOMO (n=300):
+   graphify `recall@10 = 0.497`. Under half of relevant items surface in the top
+   ten. For a *reading* tool that is fine. For an agent whose correctness depends
+   on not missing the one relevant fact, 0.497 is a coin flip on the edge cases.
+3. **It loses on answers to a system with no graph at all.** Same table: QA
+   accuracy 45.3% for graphify vs 49.7% for supermemory, 27.3% for mem0. The graph
+   wins retrieval and loses answering — i.e. the graph is not where the accuracy
+   is.
+4. **The graph is static and query-agnostic.** Communities are computed once per
+   build and mostly reflect *the corpus*, not *your question*. You pay for the
+   whole structure and then grep it. Nothing in it is conditioned on the task at
+   hand or on the token budget you have left.
+5. **Install cost and staleness.** Python 3.11.5+, uv/pipx, a rebuild step, hooks.
+   Anything that can go stale gets trusted after it is stale.
+
+## The four real upgrades, ranked
+
+### 1. Rank under a budget, don't just index — aider's repo map
+
+Aider sends a map of the repo (files + signatures + the lines that define them)
+and chooses what to include with a **graph ranking algorithm over a file
+dependency graph, optimized to fit an active token budget** — 1k tokens by
+default, widened only when the chat has no files attached yet.
+
+Why this beats a static community graph: it is *query- and state-conditioned* and
+it is *budget-first*. Instead of "here is everything, go look", it answers "given
+~1,000 tokens and this conversation, which declarations are most likely needed".
+That is exactly the utility-per-token optimisation graphify omits. Same input
+(AST + dependency edges), better use of it.
+
+Cheap to imitate without any install: rank candidate files by definition hits,
+import proximity and size, then emit signatures only. That is rung 3 of the
+ladder.
+
+### 2. Get precise instead of getting big — Serena (LSP, symbol level)
+
+Serena exposes IDE-grade semantic tools over MCP: `find_symbol`, symbol overview,
+`find_referencing_symbols`, rename, symbol-scoped edits, diagnostics.
+
+- **Pro:** acts on symbols, not line numbers or text patterns — so a cross-file
+  rename is one atomic call instead of 8–12 read/edit/verify steps. Symbol-scoped
+  edits are far less token-hungry and far less error-prone than search-and-replace.
+  Its own agent-run evaluation has Opus/GPT agents independently calling it the
+  most impactful addition to their toolkit on large codebases.
+- **Con:** needs a language server per language and a **local process** behind it
+  (stdio, or HTTP served from your own machine), so it cannot be installed from
+  this app, which only reaches remote MCP servers over https. GPL-3.0.
+- **Takeaway to steal:** precision beats coverage. A tool that returns the one
+  referrer list is worth more than a graph you have to traverse to find it.
+
+### 3. Just-in-time retrieval beats pre-indexing, for code — Anthropic's own position
+
+Their context-engineering guidance is explicit: agents should keep lightweight
+identifiers (paths, queries, links) and load data *at runtime* with tools, using a
+hybrid — a small always-on instruction file, plus `glob`/`grep` for everything
+else — "effectively bypassing the issues of stale indexing and complex syntax
+trees".
+
+That is a direct argument against pre-building a structure you then trust. It is
+also why this protocol is a ladder of local operations rather than a build step:
+nothing to install, nothing to go stale, correctness tied to the files as they
+are right now.
+
+Same document supplies the rest of the discipline: **compaction** (summarise, keep
+the decisions and the open bugs, drop raw tool output), **structured note-taking**
+(persist outside the context window; a `NOTES.md` is a memory system), and
+**sub-agents** (explore wide in a clean context, return 1–2k tokens). Persisting
+notes is rung 6 for exactly this reason.
+
+### 4. The thing nobody sells: a stop rule
+
+Every tool above optimises *finding*. None optimises *stopping*. The failure mode
+that actually burns an agent's context is not a bad index — it is the fourth and
+fifth hopeful read after the first two missed. A stated budget and a two-strike
+rule are free, and worth more than most of the software in this document.
+
+## Ranked verdict
+
+| Approach | Mechanism | Wins on | Loses on | Verdict |
+| --- | --- | --- | --- | --- |
+| **Ranked map under budget** (aider) | tree-sitter + PageRank over deps + token budget | Utility per token; no server; 1k tokens default | No doc/semantic understanding; unverified edges | **Best single idea. Adopted as rungs 2–3.** |
+| **Symbol-level retrieval** (Serena) | LSP symbols, referrers, atomic refactors | Precision; correctness of edits | Needs a local process; per-language servers; GPL | **Best idea you cannot install here. Adopted as rules 3–5.** |
+| **Just-in-time + notes** (Anthropic) | grep/glob/read, compaction, NOTES, subagents | Never stale; zero install; cheap | No global view; slower; wanders without stop rules | **The substrate. Adopted as rungs 0–1 and 6.** |
+| **graphify** | AST + Leiden communities + static graph | Deterministic, free, explained, shareable, multimodal | Static, query-agnostic, `recall@10 0.497`, loses QA to supermemory | **Keep as the map layer, not the retrieval layer.** |
+| **Vector RAG / mem0 / supermemory** | embeddings over chunks | Recall of fuzzy facts (`0.149` / `0.048` @10) | Structure and exactness; chunk boundaries; staleness | **Worst fit for code. Skip.** |
+
+## The composition nobody ships
+
+graphify's extracted edges are precisely the input a PageRank needs. It builds the
+graph; nothing in it applies the ranking. That is the whole gap:
+
+> **A knowledge graph is a data structure. It becomes effective only when a
+> ranking function spends it against a token budget, per query.**
+
+So the correct use of graphify is not `/graphify` then browse. It is: extract
+once, then rank with the current question, take the top of the map under budget,
+descend into exactly those bodies, persist what you learned. Which is what this
+project does, with no install and no rebuild.
+
+## Sources
+
+- graphify — repo, README, self-reported benchmarks: `github.com/Graphify-Labs/graphify`
+- aider repository map (PageRank + token budget): `aider.chat/docs/repomap.html`
+- Serena — LSP-backed semantic retrieval over MCP: `github.com/oraios/serena`
+- Anthropic, *Effective context engineering for AI agents* — just-in-time
+  retrieval, compaction, note-taking, sub-agents: `anthropic.com/engineering/effective-context-engineering-for-ai-agents`
