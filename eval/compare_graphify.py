@@ -23,8 +23,8 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-import retrieval_bench as bench  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import ctx  # noqa: E402
 
 
 def main(argv: list[str]) -> int:
@@ -47,12 +47,12 @@ def main(argv: list[str]) -> int:
         print(f"no graph at {graph_path}", file=sys.stderr)
         return 2
 
-    corpus = bench.load_corpus(Path(args.corpus))
-    if not corpus.files:
+    files = ctx.load(Path(args.corpus))
+    if not files:
         print(f"no source files under {args.corpus}", file=sys.stderr)
         return 1
 
-    queries = bench.auto_queries(corpus, args.queries, args.seed)
+    queries = ctx.auto_queries(files, args.queries, args.seed)
     if not queries:
         print("no queries generated", file=sys.stderr)
         return 1
@@ -69,15 +69,15 @@ def main(argv: list[str]) -> int:
         if not text or text == "No matching nodes found.":
             empty += 1
             text = ""
-        recall_total += bench.recall_of(text, needles)
-        tokens_total += bench.estimate_tokens(text) if text else 0
+        recall_total += ctx.recall_of(text, needles)
+        tokens_total += ctx.tokens(text) if text else 0
 
     count = len(queries)
     mean_recall = recall_total / count
     mean_tokens = tokens_total / count
     per_1k = (mean_recall / (mean_tokens / 1000.0)) if mean_tokens else 0.0
 
-    print(f"corpus: {args.corpus}  files: {len(corpus.files)}  queries: {count}")
+    print(f"corpus: {args.corpus}  files: {len(files)}  queries: {count}")
     print(f"graphify graph: {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges")
     print()
     print("| policy | recall | tokens | recall/1k |")
@@ -85,7 +85,7 @@ def main(argv: list[str]) -> int:
     print(f"| graphify query | {mean_recall:.3f} | {mean_tokens:.0f} | {per_1k:.3f} |")
     if empty:
         print(f"\n{empty}/{count} queries returned no matching nodes at all")
-    print("\nFor the same corpus the ladder's numbers come from `--sweep` in retrieval_bench.py.")
+    print("\nFor the same corpus the ladder's numbers come from `ctx bench --sweep`.")
     return 0
 
 

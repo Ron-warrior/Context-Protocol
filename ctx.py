@@ -1337,7 +1337,11 @@ def cmd_bench(args) -> int:
         for query in queries:
             needles = query["needles"]
             words = words_of(needles[0])
-            context, _used = intelligence(words, needles[0])
+            # `intelligence` now lives inside bench_rows; call the same engine
+            # directly rather than resurrecting a closure that no longer exists.
+            context = build_context(
+                corpus, words, args.budget, phrase=needles[0], phases=phases
+            )[0]
             if recall_of(context, needles) >= 1.0:
                 continue
             missed += 1
