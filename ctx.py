@@ -50,7 +50,7 @@ PROSE_EXT = {".md", ".rst", ".txt"}
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "2.22.0"
+__version__ = "2.23.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -95,6 +95,9 @@ class Source:
     path: str
     text: str
     symbols: set[str] = field(default_factory=set)
+    # Whole identifiers, unsplit. `symbols` holds their parts, which is what
+    # ranking wants; a declared name can only be found by its whole form.
+    identifiers: set[str] = field(default_factory=set)
     lines: list[str] = field(default_factory=list)
     lowered: list[str] = field(default_factory=list)
     low: str = ""
@@ -108,6 +111,8 @@ class Source:
             self.low = self.text.lower()
         if not self.lowered:
             self.lowered = [line.lower() for line in self.lines]
+        if not self.identifiers:
+            self.identifiers = {ident.lower() for ident in IDENT_RE.findall(self.text)}
 
 
 def tokens(text: str) -> int:
@@ -212,11 +217,13 @@ def load(root: Path) -> list[Source]:
         if not text.strip():
             continue
         symbols: set[str] = set()
+        identifiers: set[str] = set()
         for ident in IDENT_RE.findall(text):
+            identifiers.add(ident.lower())
             for part in split_identifier(ident):
                 if len(part) > 2:
                     symbols.add(part)
-        files.append(Source(str(rel), text, symbols))
+        files.append(Source(str(rel), text, symbols, identifiers))
     return files
 
 
@@ -275,13 +282,14 @@ def best_hit_lines(source: Source, words: list[str], limit: int = 2) -> list[int
     return [index for _score, _neg, index in scored[:limit]]
 
 
-def enclosing_block(text: str, hit: int) -> tuple[int, int]:
+def block_bounds(lines: list[str], hit: int) -> tuple[int, int]:
     """The function or block containing `hit`, from its declaration down past it.
 
     Intelligence-first: a fixed +-4 window cuts the answer off whenever the
     question is about what a function *does* rather than which line matches.
+    Takes the already-split lines so callers that hold a `Source` do not split the
+    whole file again for every hit.
     """
-    lines = text.splitlines()
     start = None
     for index in range(min(hit, len(lines) - 1), -1, -1):
         if declaration_name(lines[index]):
@@ -299,9 +307,15 @@ def enclosing_block(text: str, hit: int) -> tuple[int, int]:
     return start, end
 
 
-def numbered(text: str, start: int, end: int) -> str:
-    lines = text.splitlines()[start:end]
-    return "\n".join(f"{start + i + 1}: {line[:200]}" for i, line in enumerate(lines))
+def enclosing_block(text: str, hit: int) -> tuple[int, int]:
+    """`block_bounds` for a caller holding text rather than a `Source`."""
+    return block_bounds(text.splitlines(), hit)
+
+
+def numbered_lines(lines: list[str], start: int, end: int) -> str:
+    return "\n".join(
+        f"{start + i + 1}: {line[:200]}" for i, line in enumerate(lines[start:end])
+    )
 
 
 def rank(
@@ -362,230 +376,367 @@ def declared_symbols(source: Source, limit: int = 6) -> list[str]:
     return names[:limit]
 
 
-def symbol_index(files: list[Source]) -> dict[str, list[str]]:
-    """Invert the per-file identifier sets once: symbol -> files containing it.
+@dataclass
+class Corpus:
+    """The files once, and every index over them, built once.
 
-    Built from the loaded corpus, not cached to disk, so it can never be stale.
-    Without it, call_sites rescans every file for every query, which is what made
-    a 100-query benchmark crawl.
+    These indexes used to be rebuilt into local names inside the phase that
+    wanted one, and `index = stem_index(files)` in the import phase overwrote the
+    symbol index that the call-site phase was about to use. That phase therefore
+    searched file stems for symbol names and emitted nothing at all, for every
+    query, from the moment it was written. One owner removes the possibility.
     """
-    index: dict[str, list[str]] = {}
-    for source in files:
-        for symbol in source.symbols:
-            index.setdefault(symbol, []).append(source.path)
-    return index
 
+    files: list[Source]
+    by_path: dict[str, Source] = field(default_factory=dict)
+    by_stem: dict[str, str] = field(default_factory=dict)
+    by_ident: dict[str, list[str]] = field(default_factory=dict)
 
-def call_sites(
-    files: list[Source],
-    symbols: list[str],
-    skip: set[str],
-    limit: int = 4,
-    index: dict[str, list[str]] | None = None,
-):
-    """Where the declared names are used, outside the files already included.
+    def __post_init__(self) -> None:
+        for source in self.files:
+            self.by_path.setdefault(source.path, source)
+            for ident in source.identifiers:
+                self.by_ident.setdefault(ident, []).append(source.path)
+        self.by_stem = stem_index(self.files)
 
-    The answer to "how does X work" is often half in the definition and half in
-    the caller that decides when it runs.
-    """
-    if index is None:
-        index = symbol_index(files)
-    by_path = {source.path: source for source in files}
-    found: list[tuple[str, int, int]] = []
-    visited: set[str] = set()
-    for symbol in symbols:
-        for path in index.get(symbol, ()):
-            if path in skip or path in visited:
-                continue
-            source = by_path.get(path)
-            if not source:
-                continue
-            hits = hit_lines(source, [symbol])[:1]
-            if not hits:
-                continue
-            visited.add(path)
-            start = max(0, hits[0] - 6)
-            end = min(len(source.lines), hits[0] + 7)
-            found.append((path, start, end))
-            if len(found) >= limit:
-                return found
-    return found
+    def paths_with(self, name: str) -> list[str]:
+        """Files containing this exact identifier, unsplit.
+
+        A declaration is snake_case or camelCase while `Source.symbols` holds its
+        parts, so looking `refresh_token` up by whole name in a parts index misses
+        however correct that index is — the second reason the call-site phase was
+        empty. This is the index that can answer it.
+        """
+        return self.by_ident.get(name, [])
 
 
 SMALL_FILE_LINES = 60
+# Narrower views of the same hit, tried in order when the better one will not fit.
+SHRINK_SPANS = (24, 14, 8, 4)
 
 
-def emit_range(source: Source, hit: int) -> tuple[int, int]:
-    """Whole file when it is short, otherwise the block containing the hit.
+def candidate_ranges(source: Source, hit: int) -> list[tuple[int, int]]:
+    """Ranges for one hit, best first: the whole small file, its block, windows.
 
-    A 40-line file costs little more than one of its functions and contains
-    everything else in it, so one hit line can no longer hide the answer in a
-    sibling function.
+    A block that did not fit the remaining budget used to be discarded outright,
+    so the last few hundred tokens of every query bought nothing at all — the
+    policy spent ~2,900 of 4,000 and stopped. Each alternative after the first is
+    strictly narrower, so falling through can only add coverage the refusal
+    threw away, never displace coverage that already fit.
     """
-    if len(source.lines) <= SMALL_FILE_LINES:
-        return 0, len(source.lines)
-    return enclosing_block(source.text, hit)
+    total = len(source.lines)
+    ranges: list[tuple[int, int]] = []
+    if total <= SMALL_FILE_LINES:
+        ranges.append((0, total))
+    start, end = block_bounds(source.lines, hit)
+    if (start, end) not in ranges:
+        ranges.append((start, end))
+    for span in SHRINK_SPANS:
+        if span >= end - start:
+            continue
+        low = max(0, min(hit - span // 2, total - span))
+        high = min(total, low + span)
+        if low <= hit < high and (low, high) not in ranges:
+            ranges.append((low, high))
+    return ranges
 
 
-def build_context(
-    files: list[Source],
+PHASES = ("body", "excerpt", "map", "related", "call", "twohop")
+# The header is text the model reads, so it is paid for out of the budget like
+# everything else. Reserving a fixed cost for it keeps the *reported* total —
+# which now counts every label and the header — inside the budget exactly. The
+# old accounting summed block bodies only, so `used` understated what it emitted.
+HEADER_RESERVE = 24
+
+
+@dataclass
+class Chunk:
+    """One range chosen for the context, before it becomes text.
+
+    Selection and rendering used to be the same expression, which made three
+    things impossible at once: saying what a phase contributed, saying whether a
+    missed line was inside an emitted range, and charging for the label the model
+    actually reads.
+    """
+
+    path: str
+    start: int
+    end: int
+    kind: str
+    label: str
+    text: str
+
+    @property
+    def cost(self) -> int:
+        return tokens(f"### {self.label}\n{self.text}")
+
+
+def make_chunk(source: Source, start: int, end: int, kind: str) -> Chunk:
+    label = f"{source.path}:{start + 1}-{end} ({kind})"
+    return Chunk(
+        source.path, start, end, kind, label,
+        numbered_lines(source.lines, start, end),
+    )
+
+
+def outline_chunk(source: Source, label: str) -> Chunk | None:
+    block = "\n".join(outline(source))
+    if not block:
+        return None
+    return Chunk(source.path, 0, 0, "map", label, block)
+
+
+def plan_context(
+    corpus: Corpus,
     words: list[str],
     budget: int,
     expand: bool = True,
-    index: dict[str, list[str]] | None = None,
     phrase: str = "",
-):
-    """Intelligence first, then cost. Returns (text, tokens_used, chunks)."""
-    ranked = rank(files, words, phrase)
-    if not ranked:
-        return "", 0, 0
+    phases: set[str] | None = None,
+) -> list[Chunk]:
+    """Choose ranges under the budget. Rendering happens afterwards, in one place.
 
+    Phases run in a fixed order because the order is the objective: the answer's
+    own blocks, then every other ranked match, then the map, then one hop out,
+    then callers, then two hops. `phases` makes any of them removable, which is
+    what lets a version be blamed on one phase instead of on the whole policy.
+    """
+    active = set(PHASES) if phases is None else set(phases) & set(PHASES)
+    if not expand:
+        active -= {"related", "call", "twohop"}
+    ranked = rank(corpus.files, words, phrase)
+    if not ranked or not active:
+        return []
+
+    room = budget - HEADER_RESERVE
     used = 0
-    chunks: list[tuple[str, str]] = []
-    seen: set[tuple[str, int, int]] = set()
+    chunks: list[Chunk] = []
+    ranges: set[tuple[str, int, int]] = set()
+    mapped: set[str] = set()
     seen_text: set[str] = set()
 
-    def add(label: str, block: str) -> bool:
+    def contains_known(path: str, start: int, end: int) -> bool:
+        """True when this range is nested in, or wraps, one already emitted.
+
+        Partially overlapping functions of one file are allowed; a block that
+        merely repeats a range already in the context is not.
+        """
+        for name, low, high in ranges:
+            if name != path:
+                continue
+            if (low <= start and end <= high) or (start <= low and high <= end):
+                return True
+        return False
+
+    def take(chunk: Chunk) -> bool:
         nonlocal used
-        stripped = block.strip()
+        stripped = chunk.text.strip()
         if not stripped or stripped in seen_text:
             return False
-        cost = tokens(block)
-        if used + cost > budget:
+        if used + chunk.cost > room:
             return False
-        chunks.append((label, block))
+        chunks.append(chunk)
         seen_text.add(stripped)
-        used += cost
+        used += chunk.cost
         return True
 
-    # Phase 1 — the answer itself: the enclosing block of the best matches.
-    # 2.18.0's diagnose: 10 misses, median rank 1, 8 of 10 inside the top 10. The
-    # file is already found; the needle still escapes because two lines per file
-    # is a guess at which part of it matters. On that run the policy spent 2,903
-    # of 4,000 tokens, so the headroom exists to stop guessing and cover more of
-    # the files that ranked first.
-    for position, (_score, source) in enumerate(ranked[:3]):
-        hit_limit = 4 if position == 0 else 3
-        for hit in best_hit_lines(source, words, hit_limit):
-            start, end = emit_range(source, hit)
-            if (source.path, start, end) in seen:
-                continue
-            seen.add((source.path, start, end))
-            add(f"{source.path}:{start + 1}-{end} (body)", numbered(source.text, start, end))
+    def too_big(source: Source, start: int, end: int) -> bool:
+        """True only when the range provably cannot fit; a cheap pre-check.
 
-    # Phase 2 — blocks from every other ranked match, BEFORE any map, spending the
-    # budget rather than stopping at an arbitrary rank. Diagnosis was unambiguous:
-    # 29 of 29 misses were "ranked but not emitted", with 30% of the budget left
-    # unspent while an arbitrary rank-10 cut ended the bodies. The ranking already
-    # found every file; the emission was refusing to use it.
-    reserve = int(budget * 0.15)
-    for position, (_score, source) in enumerate(ranked[3:], start=4):
-        if used > budget - reserve:
-            break
-        pieces: list[str] = []
-        # Three blocks near the top, not two, and one per file below rank 10: the
-        # 8-of-10 misses inside the top 10 need coverage of the file, not another
-        # file below it.
-        per_file = 3 if position <= 10 else 1
-        for hit in best_hit_lines(source, words, per_file):
-            start, end = emit_range(source, hit)
-            if (source.path, start, end) in seen:
-                continue
-            seen.add((source.path, start, end))
-            pieces.append(numbered(source.text, start, end))
-        if pieces:
-            add(f"{source.path} (excerpt)", "\n".join(pieces))
+        Rendering a range to discover it does not fit is the expensive way to learn
+        what the line lengths already show. The floor is a true lower bound on the
+        rendered text: every line is at least one character plus a newline, and
+        `take` still measures the real cost before anything is kept. The gutter is
+        deliberately left out — its width varies with the line number, so counting
+        a minimum for it would only be a guess.
+        """
+        span = source.lines[start:end]
+        if not span:
+            return True
+        floor = sum(1 + min(len(line), 200) for line in span)
+        return used + floor // 4 + 1 > room
 
-    # Phase 3 — the map: signatures, so the model knows what else exists.
-    for _score, source in ranked:
-        block = "\n".join(outline(source))
-        if block:
-            add(source.path, block)
+    def emit(source: Source, hit: int, kind: str) -> bool:
+        """The best range for this hit that the remaining budget can pay for."""
+        for start, end in candidate_ranges(source, hit):
+            if too_big(source, start, end):
+                continue
+            if contains_known(source.path, start, end):
+                continue
+            if take(make_chunk(source, start, end, kind)):
+                ranges.add((source.path, start, end))
+                return True
+        return False
+
+    def emit_outline(source: Source, label: str) -> bool:
+        if source.path in mapped:
+            return False
+        chunk = outline_chunk(source, label)
+        if chunk is None or not take(chunk):
+            return False
+        mapped.add(source.path)
+        return True
+
+    # Phase 1 — the answer itself: the best matches of the files that ranked first.
+    # 2.18.0's diagnose found the remaining misses inside the top 10, so the top of
+    # the list is where coverage is bought rather than further down it.
+    if "body" in active:
+        for position, (_score, source) in enumerate(ranked[:3]):
+            limit = 4 if position == 0 else 3
+            for hit in best_hit_lines(source, words, limit):
+                emit(source, hit, "body")
+
+    # Phase 2 — every other ranked match, spending the budget rather than stopping
+    # at an arbitrary rank. The ranking had already found the file; refusing to
+    # emit it was the measured failure ("ranked but not emitted").
+    if "excerpt" in active:
+        reserve = int(budget * 0.15)
+        for position, (_score, source) in enumerate(ranked[3:], start=4):
+            if used > room - reserve:
+                break
+            per_file = 3 if position <= 10 else 1
+            for hit in best_hit_lines(source, words, per_file):
+                emit(source, hit, "excerpt")
+
+    # Phase 3 — the map: signatures, so the model knows what else exists. Every
+    # ranked file is tried: an outline is small, so a later one can still fit after
+    # an earlier one did not, and cutting the loop short would drop that coverage.
+    if "map" in active:
+        for _score, source in ranked:
+            emit_outline(source, source.path)
 
     # Phase 4 — one hop out: what the top file imports. Often where the
     # definition lives, and cheap because it is outlines only.
-    if expand:
-        by_path = {source.path: source for source in files}
-        index = stem_index(files)
+    if "related" in active:
         for _score, source in ranked[:2]:
-            for target in related(source, index)[:4]:
-                other = by_path.get(target)
-                if not other:
-                    continue
-                block = "\n".join(outline(other))
-                if block:
-                    add(f"{target} (related to {source.path})", block)
+            for target in related(source, corpus.by_stem)[:4]:
+                other = corpus.by_path.get(target)
+                if other:
+                    emit_outline(other, f"{target} (related to {source.path})")
 
     # Phase 5 — who calls what was found. The definition says how; the caller says
-    # when and why, and that is usually what the question is really asking.
-    if expand:
+    # when and why. This phase emitted nothing at all before 2.23.0, for two
+    # separate reasons: the import phase overwrote the symbol index with the stem
+    # index, and a declared name was looked up whole in an index keyed by its
+    # split parts. Both are regression-tested in `selftest`.
+    if "call" in active:
         symbols: list[str] = []
         for _score, source in ranked[:2]:
             for name in declared_symbols(source):
                 if name not in symbols:
                     symbols.append(name)
         included = {source.path for _score, source in ranked[:3]}
-        for path, start, end in call_sites(files, symbols, included, index=index):
-            add(f"{path}:{start + 1}-{end} (call site)", numbered(
-                next(f for f in files if f.path == path).text, start, end))
+        made = 0
+        for symbol in symbols:
+            for path in corpus.paths_with(symbol):
+                if path in included:
+                    continue
+                other = corpus.by_path.get(path)
+                if other is None:
+                    continue
+                hits = hit_lines(other, [symbol])[:1]
+                if not hits:
+                    continue
+                if emit(other, hits[0], "call"):
+                    included.add(path)
+                    made += 1
+                if made >= 4:
+                    break
+            if made >= 4:
+                break
 
     # Phase 6 — only if the budget is still mostly unspent, go one hop further.
     # Cheap-in, high-signal-out, and never at the expense of phases 1-5.
-    if expand and used < int(budget * 0.6):
-        by_path = {source.path: source for source in files}
-        index = stem_index(files)
+    if "twohop" in active and used < int(budget * 0.6):
         for _score, source in ranked[:1]:
-            for first in related(source, index)[:3]:
-                middle = by_path.get(first)
-                if not middle:
+            for first in related(source, corpus.by_stem)[:3]:
+                middle = corpus.by_path.get(first)
+                if middle is None:
                     continue
-                for second in related(middle, index)[:2]:
-                    other = by_path.get(second)
-                    if not other or other.path == source.path:
+                for second in related(middle, corpus.by_stem)[:2]:
+                    other = corpus.by_path.get(second)
+                    if other is None or other.path == source.path:
                         continue
-                    block = "\n".join(outline(other))
-                    if block:
-                        add(f"{second} (two hops from {source.path})", block)
+                    emit_outline(other, f"{second} (two hops from {source.path})")
 
-    body = "\n\n".join(f"### {label}\n{block}" for label, block in chunks)
-    header = f"# context ({len(chunks)} chunks, ~{used} tokens)\n"
-    return header + body, used, len(chunks)
+    return chunks
 
 
-def build_context_lean(files: list[Source], words: list[str], budget: int, phrase: str = ""):
-    """Token-first baseline: map within 40% of the budget, then short windows."""
-    ranked = rank(files, words, phrase)
+def render_context(chunks: list[Chunk]) -> tuple[str, int]:
+    """Text and its true cost: the header and every label are inside the count.
+
+    The header states how many chunks there are but not a token figure. A figure
+    embedded in the text would have to be known before the text that contains it
+    is measured, which is circular; stating the count and charging the header a
+    fixed reserve keeps the reported total exact.
+    """
+    body = "\n\n".join(f"### {chunk.label}\n{chunk.text}" for chunk in chunks)
+    header = f"# context ({len(chunks)} chunks)\n"
+    text = header + body
+    return text, tokens(text)
+
+
+def build_context(
+    corpus: Corpus,
+    words: list[str],
+    budget: int,
+    expand: bool = True,
+    phrase: str = "",
+    phases: set[str] | None = None,
+):
+    """Intelligence first, then cost. Returns (text, tokens_used, chunks)."""
+    chunks = plan_context(corpus, words, budget, expand, phrase, phases)
+    if not chunks:
+        return "", 0, 0
+    text, used = render_context(chunks)
+    return text, used, len(chunks)
+
+
+def build_context_lean(
+    corpus: Corpus, words: list[str], budget: int, phrase: str = ""
+):
+    """Token-first baseline: map within 40% of the budget, then short windows.
+
+    Charged on the same basis as `build_context` — labels and header included —
+    so the comparison between the two carries no caveat.
+    """
+    ranked = rank(corpus.files, words, phrase)
     head = max(1, int(budget * 0.4))
+    room = budget - HEADER_RESERVE
     used = 0
+    mapped = 0
     chunks: list[tuple[str, str]] = []
+
+    def push(label: str, text: str, ceiling: int) -> bool:
+        nonlocal used
+        cost = tokens(f"### {label}\n{text}")
+        if used + cost > min(ceiling, room):
+            return False
+        chunks.append((label, text))
+        used += cost
+        return True
 
     for _score, source in ranked:
         block = "\n".join(outline(source))
         if not block:
             continue
-        cost = tokens(block)
-        if used + cost > head:
+        cost = tokens(f"### {source.path}\n{block}")
+        if mapped + cost > head:
             continue
-        chunks.append((source.path, block))
-        used += cost
+        if push(source.path, block, head):
+            mapped += cost
 
     for _score, source in ranked:
-        if used >= budget:
-            break
         hits = hit_lines(source, words)[:1]
         if not hits:
             continue
         start = max(0, hits[0] - 4)
-        end = min(len(source.text.splitlines()), hits[0] + 5)
-        block = numbered(source.text, start, end)
-        cost = tokens(block)
-        if used + cost > budget:
-            continue
-        chunks.append((f"{source.path} (excerpt)", block))
-        used += cost
+        end = min(len(source.lines), hits[0] + 5)
+        push(f"{source.path} (excerpt)", numbered_lines(source.lines, start, end), room)
 
-    body = "\n\n".join(f"### {label}\n{block}" for label, block in chunks)
-    return body, used, len(chunks)
+    body = "\n\n".join(f"### {label}\n{text}" for label, text in chunks)
+    header = f"# context ({len(chunks)} chunks)\n"
+    return header + body, tokens(header + body), len(chunks)
 
 
 def recall_of(context: str, needles: list[str]) -> float:
@@ -649,6 +800,24 @@ def load_rc(root: Path) -> dict[str, str]:
     return out
 
 
+def phases_of(spec: str | None) -> set[str] | None:
+    """`--phases body,call` -> that set, or None for all of them.
+
+    Naming an unknown phase is an error rather than a silent no-op: a run that
+    measures nothing because of a typo is worse than one that refuses to start.
+    """
+    if not spec:
+        return None
+    wanted = {part.strip().lower() for part in spec.split(",") if part.strip()}
+    unknown = wanted - set(PHASES)
+    if unknown:
+        raise SystemExit(
+            f"unknown phase(s): {', '.join(sorted(unknown))}; "
+            f"known: {', '.join(PHASES)}"
+        )
+    return wanted
+
+
 def cmd_map(args) -> int:
     files = load(Path(args.path))
     if not files:
@@ -661,7 +830,8 @@ def cmd_map(args) -> int:
 
 
 def cmd_query(args) -> int:
-    files = load(Path(args.path))
+    corpus = Corpus(load(Path(args.path)))
+    files = corpus.files
     if not files:
         print("no source files", file=sys.stderr)
         return 1
@@ -688,11 +858,13 @@ def cmd_query(args) -> int:
     expand = args.expand
     if rc.get("expand", "").lower() in {"off", "false", "0", "no"}:
         expand = False
+    phases = phases_of(getattr(args, "phases", None))
     if args.lean:
-        body, used, chunks = build_context_lean(files, words, budget, args.question)
+        body, used, chunks = build_context_lean(corpus, words, budget, args.question)
     else:
         body, used, chunks = build_context(
-            files, words, budget, expand=expand, phrase=args.question
+            corpus, words, budget, expand=expand, phrase=args.question,
+            phases=phases,
         )
     elapsed = (time.perf_counter() - started) * 1000
 
@@ -774,7 +946,8 @@ def cmd_plan(_args) -> int:
 
 
 def cmd_bench(args) -> int:
-    files = load(Path(args.path))
+    corpus = Corpus(load(Path(args.path)))
+    files = corpus.files
     if not files:
         print("no source files", file=sys.stderr)
         return 1
@@ -785,26 +958,33 @@ def cmd_bench(args) -> int:
         print("no queries generated", file=sys.stderr)
         return 1
 
+    # The whole corpus is the same string for every question, so it is built once.
+    # 100 queries were each rebuilding two million tokens of text for a number that
+    # cannot change between them.
+    whole: list[tuple[str, int]] = []
+
     def read_all(_words, _phrase):
-        body = "\n\n".join(f"### {s.path}\n{s.text}" for s in files)
-        return body, tokens(body)
+        if not whole:
+            body = "\n\n".join(f"### {s.path}\n{s.text}" for s in files)
+            whole.append((body, tokens(body)))
+        return whole[0]
 
     def grep(words, _phrase):
         body = "\n\n".join(
             f"### {s.path}\n{s.text}" for s in files
-            if any(w in s.text.lower() for w in words)
+            if any(word in s.low for word in words)
         )
         return body, tokens(body)
 
     def lean(words, phrase):
-        return build_context_lean(files, words, args.budget, phrase)[:2]
+        return build_context_lean(corpus, words, args.budget, phrase)[:2]
 
-    # Inverted once per run, not per query: call_sites would otherwise rescan the
-    # whole corpus for every question.
-    index = symbol_index(files)
+    phases = phases_of(getattr(args, "phases", None))
 
     def intelligence(words, phrase):
-        return build_context(files, words, args.budget, index=index, phrase=phrase)[:2]
+        return build_context(
+            corpus, words, args.budget, phrase=phrase, phases=phases
+        )[:2]
 
     policies = {
         "read_all": read_all,
@@ -945,61 +1125,92 @@ def cmd_bench(args) -> int:
 def cmd_next(args) -> int:
     """What this version still misses, named precisely enough to fix.
 
-    `ctx bench` says how many answers were missed and that they sit at median
-    rank 1. It does not say which query, which file, or whether the needle's line
-    was emitted — and without those the next change is a guess again. This is the
-    same measurement resolved to lines, which is the only form a next version can
-    start from.
+    `ctx bench` says how many answers were missed and that they sit at median rank
+    1. It does not say which query, which file, or whether the needle's line was
+    inside an emitted range — and without those the next change is a guess again.
+
+    Coverage is decided by the ranges `plan_context` actually chose, not by
+    searching the rendered text for a line. The old check could only fire when a
+    line had been emitted *and* still failed the recall test, which cannot happen
+    while the needle is on that line, so the branch was unreachable and its real
+    case — the line cut at 200 characters — was reported as a block-selection
+    fault. That named the wrong phase to fix.
     """
-    files = load(Path(args.path))
-    if not files:
+    corpus = Corpus(load(Path(args.path)))
+    if not corpus.files:
         print("no source files", file=sys.stderr)
         return 1
     queries = auto_queries(
-        files, args.queries, args.seed, args.rare, code_only=args.code_only
+        corpus.files, args.queries, args.seed, args.rare, code_only=args.code_only
     )
     if not queries:
         print("no queries generated", file=sys.stderr)
         return 1
 
-    index = symbol_index(files)
-    misses: list[tuple[str, str, int, int, bool]] = []
+    phases = phases_of(getattr(args, "phases", None))
+    misses: list[dict] = []
     for query in queries:
         needle = query["needles"][0]
         words = words_of(needle)
-        context = build_context(
-            files, words, args.budget, index=index, phrase=needle,
-        )[0]
+        chunks = plan_context(
+            corpus, words, args.budget, phrase=needle, phases=phases
+        )
+        context = render_context(chunks)[0] if chunks else ""
         if recall_of(context, query["needles"]) >= 1.0:
             continue
-        holders = [source for source in files if needle in source.text]
+        holders = [source for source in corpus.files if needle in source.text]
         if not holders:
             continue
-        ranked_paths = [source.path for _score, source in rank(files, words, needle)]
+        ranked_paths = [
+            source.path for _score, source in rank(corpus.files, words, needle)
+        ]
         for holder in holders:
-            lines = hit_lines(holder, [needle.lower()])
-            if not lines:
+            hits = hit_lines(holder, [needle.lower()])
+            if not hits:
                 continue
-            line = lines[0]
-            position = ranked_paths.index(holder.path) + 1 if holder.path in ranked_paths else 0
-            needle_line = holder.lines[line].strip()
-            covered = bool(needle_line) and needle_line in context
-            misses.append((needle, holder.path, line, position, covered))
+            line = hits[0]
+            position = (
+                ranked_paths.index(holder.path) + 1
+                if holder.path in ranked_paths else 0
+            )
+            covering = [
+                chunk for chunk in chunks
+                if chunk.path == holder.path and chunk.kind != "map"
+                and chunk.start <= line < chunk.end
+            ]
+            if covering:
+                why = "line emitted, but the needle sits past its 200-character cut"
+            elif position == 0:
+                why = "file never ranked"
+            elif position <= 10:
+                why = "ranked in the top 10; the chosen blocks missed the line"
+            else:
+                why = f"ranked {position}; never reached"
+            misses.append({
+                "needle": needle,
+                "path": holder.path,
+                "line": line + 1,
+                "rank": position,
+                "why": why,
+            })
 
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "corpus": args.path,
+            "queries": len(queries),
+            "rare": args.rare,
+            "budget": args.budget,
+            "misses": misses,
+        }, indent=2))
+        return 0
+
+    scope = " (code-only)" if getattr(args, "code_only", False) else ""
     print(f"next: {len(misses)} misses on {args.path} "
-          f"({len(queries)} queries, rare<={args.rare}, budget {args.budget})")
-    for number, (needle, path, line, position, covered) in enumerate(misses, 1):
-        if covered:
-            why = "line emitted, needle still absent -- truncated or split"
-        elif position and position <= 10:
-            why = "ranked in the top 10; the chosen blocks missed the line"
-        elif position:
-            why = "ranked below the top 10; never reached"
-        else:
-            why = "file never ranked"
-        where = f"rank {position}" if position else "never ranked"
-        print(f"{number}. {needle}")
-        print(f"   {path}:{line + 1} ({where}) -- {why}")
+          f"({len(queries)} queries, rare<={args.rare}, budget {args.budget}){scope}")
+    for number, miss in enumerate(misses, 1):
+        where = f"rank {miss['rank']}" if miss["rank"] else "never ranked"
+        print(f"{number}. {miss['needle']}")
+        print(f"   {miss['path']}:{miss['line']} ({where}) -- {miss['why']}")
     return 0
 
 
@@ -1050,6 +1261,7 @@ def cmd_selftest(_args) -> int:
         )
 
         files = load(root)
+        corpus = Corpus(files)
         assert len(files) == 2, f"expected 2 files, got {len(files)}"
         checks += 1
 
@@ -1083,7 +1295,7 @@ def cmd_selftest(_args) -> int:
         assert hi - lo <= MAX_BODY_LINES, "block must respect the cap"
         checks += 2
 
-        body, used, chunks = build_context(files, ["refresh", "token"], 4000)
+        body, used, chunks = build_context(corpus, ["refresh", "token"], 4000)
         assert "refresh_token" in body, "the context must surface the needle"
         assert "value.strip()" in body, "the enclosing body must be complete, not a +-4 window"
         assert body.startswith("# context ("), "the context must say what it is"
@@ -1091,11 +1303,13 @@ def cmd_selftest(_args) -> int:
         assert chunks >= 1, "expected at least one chunk"
         checks += 4
 
-        _tight, tight_used, _ = build_context(files, ["refresh", "token"], 64)
+        _tight, tight_used, _ = build_context(corpus, ["refresh", "token"], 64)
         assert tight_used <= 64, f"budget exceeded on the tight run: {tight_used}"
         checks += 1
 
-        _lean_body, lean_used, _ = build_context_lean(files, ["refresh", "token"], 4000)
+        _lean_body, lean_used, _ = build_context_lean(
+            corpus, ["refresh", "token"], 4000
+        )
         assert lean_used <= 4000, "lean budget exceeded"
         checks += 1
 
@@ -1106,6 +1320,45 @@ def cmd_selftest(_args) -> int:
         index = stem_index(files)
         beta = next(f for f in files if f.path == "beta.py")
         assert "alpha.py" in related(beta, index), "beta imports alpha, resolved by stem"
+        checks += 1
+
+        # 2.23.0 — the call-site phase had never emitted a single chunk. It looked a
+        # declared name up whole in an index keyed by its split parts, and the phase
+        # before it had overwritten that index anyway. Both faults are pinned here.
+        leader = Source(
+            "leader.py",
+            "def refresh_token():\n"
+            "    refresh token refresh token refresh token\n"
+            "    return 1\n",
+        )
+        followers = [
+            Source(
+                f"follower{i}.py",
+                "def use_leader():\n    return leader.refresh_token()\n",
+            )
+            for i in range(5)
+        ]
+        call_body, _call_used, _call_n = build_context(
+            Corpus([leader] + followers), ["refresh", "token"], 4000, phases={"call"}
+        )
+        assert "follower" in call_body, f"call sites must reach the context: {call_body!r}"
+        checks += 1
+
+        # A block that does not fit must narrow, not vanish: the old emitter threw
+        # away the last few hundred tokens of every query rather than shrinking.
+        huge = Source(
+            "huge.py",
+            "def giant():\n"
+            + "\n".join(f"    step_{i} = {i}" for i in range(200))
+            + "\n    needle_here()\n",
+        )
+        shrunk, shrunk_used, _ = build_context(Corpus([huge]), ["needle", "here"], 120)
+        assert "needle_here()" in shrunk, f"a block that does not fit must narrow: {shrunk!r}"
+        assert shrunk_used <= 120, f"narrowing must respect the budget: {shrunk_used}"
+        checks += 2
+
+        # The reported cost is the cost: labels and header are inside the count.
+        assert used == tokens(body), f"reported {used} but emitted {tokens(body)}"
         checks += 1
 
         queries = auto_queries(files, 5)
@@ -1156,6 +1409,11 @@ def main(argv: list[str] | None = None) -> int:
             "--rank-only", dest="rank_only", action="store_true",
             help="print the ranked files and scores, no content",
         )
+        parser_.add_argument(
+            "--phases", default=None,
+            help="comma-separated phases to run: " + ",".join(PHASES)
+                 + " (default all); naming one is how its contribution is measured",
+        )
 
     p_bench = sub.add_parser("bench", help="recall, then tokens, then time")
     p_bench.add_argument("path")
@@ -1181,6 +1439,10 @@ def main(argv: list[str] | None = None) -> int:
              "regression test CI can enforce, and a failure the only report that "
              "reaches the agent",
     )
+    p_bench.add_argument(
+        "--phases", default=None,
+        help="comma-separated phases to run: " + ",".join(PHASES) + " (default all)",
+    )
     p_bench.set_defaults(func=cmd_bench)
 
     p_next = sub.add_parser(
@@ -1199,6 +1461,11 @@ def main(argv: list[str] | None = None) -> int:
         "--code-only", action="store_true",
         help="choose needles from code files only, skipping prose (README, .txt)",
     )
+    p_next.add_argument(
+        "--phases", default=None,
+        help="comma-separated phases to run: " + ",".join(PHASES) + " (default all)",
+    )
+    p_next.add_argument("--json", action="store_true", help="machine-readable misses")
     p_next.set_defaults(func=cmd_next)
 
     p_self = sub.add_parser("selftest", help="run fixtures")

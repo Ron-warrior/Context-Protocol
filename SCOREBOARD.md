@@ -392,3 +392,44 @@ the exact thing this project exists to argue against.
 The honest consequence: the headline 0.900 may be measuring six queries that were
 never code questions. The code-only rate is the one to trust for the tool's stated
 purpose, and it is measured in CI alongside the old one rather than replacing it.
+
+
+
+## 2.22.0 — measured, code-only
+
+The prediction was that code-only recall would beat 0.900. It measured **0.940 at
+3,563 tokens**, against 0.900 at 2,776 with prose needles included. Normal (rare≤2)
+0.890 / 2,938; hard 0.900 / 2,776; `lean` 0.740 and 0.770. So the prose needles were
+noise for this tool's stated purpose — and excluding them from question generation
+costs ~790 tokens, so it is not a free lunch either.
+
+The six remaining misses, each blaming a different part of the pipeline:
+
+| needle | rank | blames |
+| --- | --- | --- |
+| `ensureApiKeysBaseUrlColumn` | 130 | ranking |
+| `firstNumber` | 37 | ranking |
+| `maxMb` | 13 | ranking |
+| `heuristicallyExhausted` | 10 | depth |
+| `informed` | 1 | block selection |
+| `complexity` | 1 | block selection |
+
+Four of six are ranking failures. Whatever else is true, emission is no longer the
+binding constraint and the next intelligence change belongs in `rank`.
+
+## 2.23.0 — architectural pass (measurement pending)
+
+Not yet measured. This row is filled from CI, not from intention, and is left empty
+on purpose until the run reports.
+
+Changed: `Corpus` owns the corpus and every index, so the call-site phase can no
+longer receive the stem index it had been searching since it was written;
+`plan_context` selects `Chunk` ranges and `render_context` renders them once; a block
+that does not fit is narrowed rather than dropped; identifiers are kept unsplit so a
+declared name resolves; the call-site phase works and is regression-tested; cost
+counts every label and the header, so **from this version the token column is the
+size actually emitted and is not comparable to 2.22.0's**; `ctx next` decides coverage
+by emitted range; `--phases` makes one phase attributable.
+
+Not changed, on purpose: `rank`. The six misses above say ranking is now the binding
+constraint, and a change there has to be measured alone.

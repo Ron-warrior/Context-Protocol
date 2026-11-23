@@ -44,9 +44,16 @@ Climb one rung at a time. Do not skip to a lower rung you cannot justify.
    large. Never enter `node_modules`, `dist`, `build`, `vendor`, `.git`.
 3. **Outline.** Read declarations only (`grep -nE '^\s*(class|def|function|func|fn|interface|struct|impl|type)\s'`).
    Build a local map before reading a body.
-4. **Scope.** Read ±40 lines around the best hit. Widen only if it missed.
-5. **Verify.** Re-read the edited region; grep every caller of a changed symbol.
-6. **Persist.** Write what you learned into the repo, not just the chat.
+4. **Scope.** Read the enclosing function of the best hit, not a ±40 window. A block
+   that will not fit the budget is narrowed, never dropped — so widen only after a
+   narrow read missed.
+5. **Write.** One function or one section per write, not one 400-line file. Past ~120
+   lines in a single write you will not re-read it, and the defects live exactly
+   where you did not re-read.
+6. **Verify.** Read back the last operation on that region — for an edit that is
+   usually the diff, not the whole file; grep every caller of a changed symbol; and
+   if the project runs, run it.
+7. **Persist.** Write what you learned into the repo, not just the chat.
 
 Stop: ~4k tokens of retrieval per question. Two misses means the strategy is
 wrong — search for the *definition*, not the *usage* — not that you need a fourth
@@ -68,14 +75,17 @@ ctx selftest                         # fixtures; exit 0 means it works
 ```
 
 `ctx query` emits, in this order: up to four enclosing blocks of the best-ranked
-file and three each for the next two, then three blocks per file down to rank 10
-and one each after that — until 85% of the budget is spent — then a signature map
-of every ranked file, then one hop of imports, then call sites of what it found.
-Blocks before maps, because an outline tells you a name exists while a body
-answers the question. Near the top the budget buys coverage of the file rather
-than another file: at 2.18.0, 8 of the 10 remaining misses were inside the top 10.
-It never reads a file it has no reason to read, and `.gitignore` plus `.ctxrc`
-(`budget=`, `expand=off`) are honoured.
+file and three each for the next two, then every other ranked match until 85% of
+the budget is spent, then a signature map of every ranked file, then one hop of
+imports, then call sites of what it found. Blocks before maps, because an outline
+tells you a name exists while a body answers the question. A block that does not
+fit the remaining room is narrowed to a smaller window around the same hit rather
+than dropped, so the last few hundred tokens still buy coverage instead of nothing.
+Cost is measured on the text actually emitted, labels and header included, so the
+`~N tokens` figure is the size of what you received. `--phases body,call` runs a
+subset of the phases, which is how a change is attributed to one of them. It never
+reads a file it has no reason to read, and `.gitignore` plus `.ctxrc` (`budget=`,
+`expand=off`) are honoured.
 
 ## Mode 3 — measure before you trust
 

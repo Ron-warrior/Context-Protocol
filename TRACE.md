@@ -818,3 +818,83 @@ narrower measurement and showing both is the defensible version.
 corpus, and the remaining misses are the two code ones plus some block-selection
 failures. If it comes out lower, the prose needles were not noise and I was wrong
 about the cause.
+
+
+
+## Trace: 2.23.0 — an architectural pass, and a phase that had never run
+
+**What the loop had just produced.** 2.22.0's code-only run measured **0.940** recall
+at 3,563 tokens (against 0.900 at 2,776 with prose needles included), and its `next`
+named six misses:
+
+| needle | where | rank | what it blames |
+| --- | --- | --- | --- |
+| `ensureApiKeysBaseUrlColumn` | `migrations/…legacy_baseline.ts:269` | 130 | ranking |
+| `firstNumber` | `model-discovery.ts:142` | 37 | ranking |
+| `maxMb` | `media.ts:1818` | 13 | ranking |
+| `heuristicallyExhausted` | `ratelimit.ts:1194` | 10 | depth |
+| `informed` | `codex-base-instructions.ts:12` | 1 | block selection |
+| `complexity` | `codex-base-instructions.ts:12` | 1 | block selection |
+
+Four of six are ranking failures, not emission failures. The instrument said the
+binding constraint had moved, which is the only thing it exists to do.
+
+**Then I read the source instead of the numbers.** Seven findings, all architectural:
+
+1. **The call-site phase had never emitted anything.** `index = stem_index(files)` in
+   the import phase overwrote the symbol index that the call-site phase then received,
+   so it searched file stems for symbol names. Separately, `declared_symbols` returns
+   whole names while the index was keyed by their split parts, so even the correct
+   index would have missed `refresh_token`. The phase had been dead since it was
+   written, and the README described it as working.
+2. **Emission was all-or-nothing.** A block that did not fit the remaining budget was
+   discarded, not narrowed. That is why the policy spent ~2,900 of 4,000 tokens and
+   stopped: the *refusal* was the ceiling, not the budget.
+3. **The cost it reported was not the cost it emitted.** `used` summed block bodies
+   only; every `### path:l-l` label and the header sat outside the count, so a
+   "budget 4,000" context was larger than 4,000.
+4. **One of `ctx next`'s four classifications was unreachable.** Its "line emitted,
+   needle absent" branch tested a stripped line against the context, so it could only
+   fire when the needle was on a line the recall test had already found. The real case
+   — the 200-character line cut — was reported as a block-selection fault, naming the
+   wrong phase.
+5. **Retrieval exists twice.** `ctx.py` and `eval/retrieval_bench.py` each carry their
+   own corpus, ranking, emission and recall code, and the research harness ranks with
+   PageRank over the import graph, which the product does not have at all. The
+   `--sweep` and `--ablate` numbers therefore describe a tool nobody can install.
+6. **`rank`'s "symbol match" is not a declaration signal.** `Source.symbols` holds
+   every identifier's *parts*, so `symbol_hits` — weight 4, the dominant term — scores
+   "this file contains the word", not "this file declares it". Rung 2 and `rank`'s own
+   docstring both claim an ordering the code does not implement. With four of six
+   misses at ranks 10–130, this is the likeliest single cause of the remaining gap.
+7. **The benchmark's query is its own needle.** `auto_queries` sets `question` to the
+   identifier and `needles` to the same identifier, so the whole-query substring boost
+   in `rank` is measured on questions whose entire text appears in the answer. It can
+   only ever fire under benchmark conditions, and never on a real question.
+
+**What 2.23.0 changes.** `Corpus` owns the files and every index, built once, so one
+phase cannot overwrite another's; `plan_context` selects `Chunk` ranges and
+`render_context` renders them once; `candidate_ranges` narrows instead of refusing;
+identifiers are stored unsplit so a declared name resolves; the call-site phase works
+and is regression-tested against both faults; cost counts labels and the header;
+`ctx next` decides coverage from emitted ranges; `--phases` makes each phase
+removable, which is the ablation the research harness had and the product did not.
+
+Two heuristics were written and then removed during this version: a consecutive-failure
+break in the excerpt and map phases. Both would have stopped walking the ranked list
+after N files that fitted nothing, and both could drop coverage from a later, smaller
+block. They were replaced by a lower-bound cost check (`too_big`), which skips
+rendering a range only when the line lengths prove it cannot fit. That is exact rather
+than probable, and it recovers most of the wasted work without a recall risk.
+
+**What it deliberately does not change.** `rank`. Finding 6 is the biggest
+intelligence lever and it has to be measured alone. Changing it in the same version as
+the emission rewrite would make the result unattributable, and `--phases` now gives
+the next version the means to separate them.
+
+**Prediction, recorded before measuring.** Recall up or flat. Tokens up, and not
+because the policy got greedier: the basis changed, so 2.23.0's token column is *not*
+comparable to 2.22.0's and the CI floor must be re-based from the new number rather
+than assumed. If recall falls, the shrink and call-site gains cost more than the
+labels they displaced, and `--phases body,excerpt` versus `body,excerpt,call` is the
+first comparison to run.
