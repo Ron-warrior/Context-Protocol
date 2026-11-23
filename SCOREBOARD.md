@@ -693,3 +693,28 @@ lookup benchmark still cannot see what the call and import phases are for.
 beside the identifier set, a default budget that came from measurement rather
 than habit, and a README inside the line budget its own protocol has required
 since 1.0.0.
+
+
+
+### 3.0.0 — measured at the new default
+
+CI, freellmapi, 795 files, 100 queries, default budget 1,000:
+
+| set | recall | was @4,000 | tokens | was @4,000 | change |
+| --- | --- | --- | --- | --- | --- |
+| normal | 0.940 | 0.940 | **929** | 3,212 | −71% |
+| hard | 1.000 | 1.000 | **877** | 2,945 | −70% |
+| hard, code-only | 0.990 | 1.000 | **973** | 3,698 | −74% |
+
+**The headline: 0.940 normal at 929 tokens, down from 3,212 for the same
+recall.** Hard is 1.000 at 877. The interval on 0.940 is 0.875–0.972, so the flat
+normal figure is flat within noise rather than pinned.
+
+One code-only query moved: `tPLATFORM` at `cli/src/keys.ts:164`, rank 3, "ranked
+in the top 10; the chosen blocks missed the line". A 1,000-token budget cannot
+carry the block that holds it. That is a single query inside the interval, and
+`ctx next` names it rather than hiding it — which is the point of the machinery.
+
+Whether to spend 3,000 more tokens per query to recover that one answer is the
+trade the objective settles: intelligence first, then tokens *subject to it*. The
+intelligence did not change (0.940 either way); the tokens did. Kept at 1,000.
