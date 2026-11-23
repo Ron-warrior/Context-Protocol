@@ -189,6 +189,10 @@ jobs:
           echo "--- what the next version should fix ---"
           python3 ctx.py next corpus --queries 100 --rare 1 >> bench-corpus-hard.txt 2>&1
           next=$?
+          echo "--- hard, code-only needles (prose excluded) ---"
+          python3 ctx.py bench corpus --queries 100 --rare 1 --code-only >> bench-corpus-hard.txt 2>&1
+          codeonly=$?
+          python3 ctx.py next corpus --queries 100 --rare 1 --code-only >> bench-corpus-hard.txt 2>&1
           tail -n 60 bench-corpus-hard.txt
           {
             echo '### bench: freellmapi, normal'
@@ -200,4 +204,4 @@ jobs:
             cat bench-corpus-hard.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          exit $((normal || hard || diag || next))
+          exit $((normal || hard || diag || next || codeonly))

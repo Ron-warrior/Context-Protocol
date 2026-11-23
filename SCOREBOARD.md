@@ -349,3 +349,40 @@ needle still absent. The next change starts from those lines.
 No retrieval behaviour changed in this version, so recall must stay at 0.890 /
 0.900. That is itself the check: a tooling version that moves the numbers is a
 tooling version with a bug.
+
+
+
+## 2.22.0 — `ctx next` found a flaw in the benchmark, not in retrieval
+
+The first real run of 2.21.0's `ctx next`, on the same 100 hard queries, named
+all 10 remaining misses:
+
+| needle | where | rank | classification |
+| --- | --- | --- | --- |
+| `truncateReason` | `services/fusion.ts:688` | 16 | never reached |
+| `chatCompletionSchema` | `routes/proxy.ts:793` | 96 | never reached |
+| `klientdan` | `README.uz.md:145` | 1 | blocks missed the line |
+| `zincirler` | `README.tr.md:160` | 1 | blocks missed the line |
+| `greetings` | `codex-base-instructions.ts:12` | 1 | blocks missed the line |
+| `qismidan` | `README.uz.md:175` | 1 | blocks missed the line |
+| `tiriyorsan` | `README.tr.md:525` | 1 | blocks missed the line |
+| `tombstone_source` | `routes/fallback.ts:169` | 7 | blocks missed the line |
+| `recapping` | `codex-base-instructions.ts:12` | 1 | blocks missed the line |
+| `kuyruklu` | `README.tr.md:157` | 1 | blocks missed the line |
+
+Six are Uzbek and Turkish words from translated READMEs. Two more are in one
+prose instructions file, at the same line. **Two are code.**
+
+`auto_queries` builds needles from identifiers in *every* text file, and `.md` is
+in the corpus. A word that appears once in a translated README therefore qualifies
+as a "rare identifier", even though no one would query a codebase for it. The
+benchmark was scoring prose recall and calling it code retrieval.
+
+`ctx bench --code-only` chooses needles from code files only; the corpus is
+unchanged, so a real question about a README is still answerable. Both rates are
+reported, because dropping hard cases quietly is how a benchmark flatters itself —
+the exact thing this project exists to argue against.
+
+The honest consequence: the headline 0.900 may be measuring six queries that were
+never code questions. The code-only rate is the one to trust for the tool's stated
+purpose, and it is measured in CI alongside the old one rather than replacing it.

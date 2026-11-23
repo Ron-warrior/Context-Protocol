@@ -778,3 +778,37 @@ and reuses it. The read-back is the only reason that defect is not in the commit
 **Prediction.** Recall unchanged at 0.890 / 0.900, because no retrieval code
 changed. If it moves, the new command is affecting the pipeline and that is a bug,
 not a gain.
+
+
+
+## Trace: 2.22.0 — the first thing `ctx next` said was that the bench was wrong
+
+**What the loop produced on its first run.** `ctx next` ran 2.21.0 on the same
+100 hard queries and named all 10 misses with file, line, rank and cause. Six
+were Uzbek and Turkish words appearing once in `README.uz.md` and `README.tr.md`.
+Two more were in one prose instructions file, both at line 12. Two were code:
+`truncateReason` at rank 16 and `chatCompletionSchema` at rank 96.
+
+**What that means.** `auto_queries` selects needles from identifiers found in any
+text file, and `.md` is a text file. So a prose word that happens to occur once
+becomes a "rare identifier" and a benchmark question. The 0.900 hard recall was
+partly a measurement of prose retrieval, which the tool was never built for and no
+developer would ask for.
+
+**Why this is 2.21.0 earning its keep.** The previous diagnose could only say
+"10 misses, median rank 1, 8 of 10 inside the top 10". That sentence is consistent
+with a block-selection bug, and I had already guessed in that direction. The
+line-level list falsified the guess in one run: the misses were mostly not code.
+
+**The change.** `ctx bench --code-only` and `ctx next --code-only` choose needles
+from code files only, skipping `.md`, `.rst` and `.txt`. The corpus is untouched,
+so a real question about a README is still answerable — only the *generated
+questions* narrow. CI runs both rates and prints both, and the code-only rate does
+not replace the default in the docs. Removing hard cases from a benchmark is the
+specific dishonesty this project was built to criticise; adding a second,
+narrower measurement and showing both is the defensible version.
+
+**Prediction.** Recall under `--code-only` is higher than 0.900 on the same
+corpus, and the remaining misses are the two code ones plus some block-selection
+failures. If it comes out lower, the prose needles were not noise and I was wrong
+about the cause.

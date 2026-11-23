@@ -45,10 +45,12 @@ TEXT_EXT = {
     ".toml", ".yaml", ".yml", ".json",
 }
 
+PROSE_EXT = {".md", ".rst", ".txt"}
+
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "2.21.0"
+__version__ = "2.22.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -593,14 +595,26 @@ def recall_of(context: str, needles: list[str]) -> float:
     return sum(1 for needle in needles if needle.lower() in low) / len(needles)
 
 
-def auto_queries(files: list[Source], count: int, seed: int = 0, rare: int = 2) -> list[dict]:
+def auto_queries(
+    files: list[Source], count: int, seed: int = 0, rare: int = 2, code_only: bool = False
+) -> list[dict]:
     """Questions built from identifiers that appear in at most `rare` files.
 
     rare=1 is the hard case and the realistic one: a fact that exists in exactly
     one place. rare=2 is easier, because a second mention is a second chance.
+
+    `code_only` skips prose when *choosing* the identifier, not when searching.
+    A word that appears once in a translated README qualifies as a rare
+    identifier and is not a fact anyone would query a codebase for; 6 of the 10
+    remaining misses were exactly that. The corpus still contains those files, so
+    a real question about them is still answerable — only the generated questions
+    get narrower. Reported alongside the default rate rather than replacing it,
+    because quietly dropping hard cases is how a benchmark flatters itself.
     """
     where: dict[str, set[str]] = {}
     for source in files:
+        if code_only and Path(source.path).suffix.lower() in PROSE_EXT:
+            continue
         for ident in set(IDENT_RE.findall(source.text)):
             where.setdefault(ident, set()).add(source.path)
     candidates = sorted(
@@ -764,7 +778,9 @@ def cmd_bench(args) -> int:
     if not files:
         print("no source files", file=sys.stderr)
         return 1
-    queries = auto_queries(files, args.queries, args.seed, args.rare)
+    queries = auto_queries(
+        files, args.queries, args.seed, args.rare, code_only=args.code_only
+    )
     if not queries:
         print("no queries generated", file=sys.stderr)
         return 1
@@ -797,7 +813,9 @@ def cmd_bench(args) -> int:
         "intelligence": intelligence,
     }
 
-    print(f"corpus: {args.path}  files: {len(files)}  queries: {len(queries)}  budget: {args.budget}")
+    scope = " (code-only)" if getattr(args, "code_only", False) else ""
+    print(f"corpus: {args.path}  files: {len(files)}  queries: {len(queries)}  "
+          f"budget: {args.budget}{scope}")
     print("objective: recall first, tokens second, speed third")
     print("tokens is what the policy ACTUALLY emitted; over = it blew the budget\n")
     print("| policy | recall | tokens | over | ms |")
@@ -937,7 +955,9 @@ def cmd_next(args) -> int:
     if not files:
         print("no source files", file=sys.stderr)
         return 1
-    queries = auto_queries(files, args.queries, args.seed, args.rare)
+    queries = auto_queries(
+        files, args.queries, args.seed, args.rare, code_only=args.code_only
+    )
     if not queries:
         print("no queries generated", file=sys.stderr)
         return 1
@@ -1152,6 +1172,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_bench.add_argument("--json", action="store_true", help="machine-readable results")
     p_bench.add_argument(
+        "--code-only", action="store_true",
+        help="choose needles from code files only, skipping prose (README, .txt)",
+    )
+    p_bench.add_argument(
         "--floor", type=float, default=None,
         help="exit 1 when intelligence recall falls below this; makes the bench a "
              "regression test CI can enforce, and a failure the only report that "
@@ -1170,6 +1194,10 @@ def main(argv: list[str] | None = None) -> int:
     p_next.add_argument(
         "--rare", type=int, default=1,
         help="needles appear in at most this many files; 1 is the hard case",
+    )
+    p_next.add_argument(
+        "--code-only", action="store_true",
+        help="choose needles from code files only, skipping prose (README, .txt)",
     )
     p_next.set_defaults(func=cmd_next)
 
