@@ -1,31 +1,10 @@
-name: bench selftest
+name: ctx
 
 on:
   push:
   pull_request:
 
 jobs:
-  selftest:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Compile the bench
-        run: python3 -m py_compile eval/retrieval_bench.py
-      - name: Run the fixture self-test
-        run: python3 eval/retrieval_bench.py --selftest
-      - name: Smoke-run every mode on this repo
-        run: |
-          python3 eval/retrieval_bench.py . --auto 10
-          python3 eval/retrieval_bench.py . --auto 10 --sweep 1000,4000
-          python3 eval/retrieval_bench.py . --auto 10 --stop
-          python3 eval/retrieval_bench.py . --auto 10 --ablate
-          python3 eval/retrieval_bench.py . --auto 10 --outline-sweep 0.2,0.4
-          python3 eval/retrieval_bench.py . --auto 10 --focus eval/retrieval_bench.py
-
-
   real-corpus:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -47,14 +26,16 @@ jobs:
       - name: Size the corpus
         run: |
           echo "source files: $(find corpus -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.md' \) | wc -l)"
-      - name: Sweep on a real repository
-        run: python3 eval/retrieval_bench.py corpus --auto 25 --sweep 1000,4000,16000
-      - name: Stop rules on a real repository
-        run: python3 eval/retrieval_bench.py corpus --auto 25 --stop
-      - name: Rung-2 ablation on a real repository
-        run: python3 eval/retrieval_bench.py corpus --auto 25 --ablate
-      - name: Outline-share sweep on a real repository
-        run: python3 eval/retrieval_bench.py corpus --auto 25 --outline-sweep 0.2,0.4,0.6
+      - name: Sweep and ablate on a real repository with ctx
+        run: |
+          set -uo pipefail
+          python3 ctx.py bench corpus --queries 25 --sweep 1000,4000,16000 > real.txt 2>&1
+          sweep=$?
+          cat real.txt
+          python3 ctx.py bench corpus --queries 25 --ablate >> real.txt 2>&1
+          ablate=$?
+          tail -n 40 real.txt
+          exit $((sweep || ablate))
 
 
   ctx:
@@ -257,6 +238,16 @@ jobs:
           ablate=$?
           python3 ctx.py next corpus --queries 100 >> primitives.txt 2>&1
           misses=$?
+          # The same ablation on hand-written questions. Identifier lookups are
+          # answered by the body of the top file alone, so a phase that earns
+          # nothing there may still earn everything on a real question. Dropping
+          # a phase on the identifier set alone would be the prose-needle mistake
+          # again: a benchmark that flatters the tool it is measuring.
+          echo "--- the same sweep and ablation on questions, not lookups ---"
+          python3 ctx.py bench eval/fixtures/ladder --queries eval/tasks.json --sweep 500,1000,2000,4000 >> primitives.txt 2>&1
+          qsweep=$?
+          python3 ctx.py bench eval/fixtures/ladder --queries eval/tasks.json --ablate >> primitives.txt 2>&1
+          qablate=$?
           tail -n 80 primitives.txt
           {
             echo '### primitives: sweep, ablation, default-set misses'
@@ -264,4 +255,4 @@ jobs:
             cat primitives.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          exit $((sweep || ablate || misses))
+          exit $((sweep || ablate || misses || qsweep || qablate))

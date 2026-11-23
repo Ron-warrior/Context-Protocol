@@ -627,3 +627,40 @@ is the same one-implementation argument that retires the research harness next.
 **Prediction recorded before measuring:** the knee is below 4,000 on the mixed
 set; at least one phase shows a delta inside the interval and should be dropped;
 the default-set misses are a different shape from the hard set's.
+
+
+
+## 2.30.0 — the harness retired, and what it measured first
+
+The primitives added in 2.29.0 ran once before the harness died, so its last act
+was to produce the numbers that retired it.
+
+**Sweep** (50 queries, 795 files): recall 0.940 at 1,000, 2,000 *and* 4,000
+tokens. Knee: **1,000**, holding 47 of 50 hits at 25% of the old budget.
+
+**Ablation** (intelligence, one phase removed):
+
+| removed | Δrecall | Δtokens |
+| --- | --- | --- |
+| body | −0.640 | −263 |
+| map | +0.000 | −275 |
+| call | +0.000 | −197 |
+| related | +0.000 | −23 |
+| excerpt | +0.000 | +2 |
+| twohop | +0.000 | +0 |
+
+On identifier queries only `body` earns recall. The other five are neutral.
+
+**The trap this avoided.** Deleting those five phases would have been the
+2.22.0 prose-needle mistake in reverse: an identifier benchmark cannot see the
+phases that answer "how does X work", which is the question the tool exists for.
+The primitives job now measures the same sweep and ablation on
+`eval/tasks.json`, and the default budget moves only when both sets agree.
+
+**Retired.** `eval/retrieval_bench.py` (1,206 lines, its own retrieval engine and
+a PageRank-over-imports policy the product never had) and the CI job that ran it.
+`compare_graphify.py` now imports `ctx`; the sweep, ablation and question-file
+modes live in `ctx bench`. One implementation.
+
+**Default budget: unchanged at 4,000 in this commit**, pending the question-set
+sweep. The number to beat is 1,000.

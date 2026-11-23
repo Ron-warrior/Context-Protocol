@@ -115,7 +115,7 @@ jobs:
         run: |
           set -euo pipefail
           source .venv-graphify/bin/activate
-          python3 eval/retrieval_bench.py corpus --auto 25 --sweep 4000
+          python3 ctx.py bench corpus --queries 25 --sweep 4000
       - name: graphify query, scored the same way
         run: |
           set -euo pipefail

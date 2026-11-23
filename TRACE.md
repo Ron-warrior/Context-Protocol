@@ -1201,3 +1201,58 @@ mixed set, since the normal bench spends 3,212. At least one phase shows a delta
 inside the interval — which is to say, no measurable contribution — and should be
 dropped in 2.30.0. The default-set `next` reports misses of a different shape
 from the hard set's, most likely truncated lines rather than unranked files.
+
+
+
+## Trace: 2.30.0 — one engine, and the numbers that retired it
+
+**What 2.29.0's primitives measured** (50 queries, freellmapi, 795 files):
+
+| budget | recall | tokens emitted |
+| --- | --- | --- |
+| 1,000 | 0.940 | 922 |
+| 2,000 | 0.940 | 1,775 |
+| 4,000 | 0.940 | 3,281 |
+
+The knee is 1,000: the same 47 of 50 hits at **25% of the budget**. Recall is
+flat across a 4x range of budget, which means the old default was paying for
+headroom nothing used.
+
+Ablation, intelligence, one phase removed:
+
+| removed | recall | Δrecall | Δtokens |
+| --- | --- | --- | --- |
+| body | 0.300 | −0.640 | −263 |
+| excerpt | 0.940 | +0.000 | +2 |
+| map | 0.940 | +0.000 | −275 |
+| related | 0.940 | +0.000 | −23 |
+| call | 0.940 | +0.000 | −197 |
+| twohop | 0.940 | +0.000 | +0 |
+
+`body` is the whole policy; every other phase is neutral on this query set and
+`map` and `call` together cost 472 tokens for nothing.
+
+**Why the phases were not deleted on that evidence.** Every generated query is a
+symbol lookup, and a lookup is answered by the body of the file it names. The
+map, the callers and the imports are for the question this tool actually exists
+to answer — "how does X work" — and an identifier benchmark cannot see them. The
+2.22.0 lesson was that a benchmark measuring the wrong thing flatters the tool;
+deleting five phases because a lookup benchmark cannot use them would be the same
+mistake in the other direction. So the primitives job now runs the same sweep and
+ablation on `eval/tasks.json`, a hand-written question set, and the default
+budget changes only after both agree.
+
+**The harness is gone.** `eval/retrieval_bench.py` carried a second retrieval
+engine — its own corpus, ranking, emission and recall — plus a PageRank policy
+the product never had. Its numbers could not be reproduced by anyone using the
+installed tool, which is the definition of a measurement that does not transfer.
+`compare_graphify.py` now imports `ctx`; the sweep and ablation moved into
+`ctx bench`; the policies it compared are `ctx bench`'s four. Its historical
+numbers stay in FINDINGS.md and SCOREBOARD.md, labelled, with the note that
+PageRank over imports had no product equivalent.
+
+**What is not claimed.** The default budget is still 4,000 in this commit. The
+sweep says 1,000 holds recall on identifier queries; whether it holds on
+questions is being measured by the job this version added. Changing the default
+before that number exists would be choosing the smaller number because it is
+smaller.
