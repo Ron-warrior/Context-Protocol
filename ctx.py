@@ -51,7 +51,7 @@ PROSE_EXT = {".md", ".rst", ".txt"}
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "3.0.0"
+__version__ = "3.0.1"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",

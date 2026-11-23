@@ -1274,3 +1274,57 @@ checking twice. Checked against the code at `0b03ad3`:
 One of four was a live defect. The other three were correct observations about an
 older commit, a design choice, and something already built — which is the value of
 checking a report against the code instead of accepting or dismissing it whole.
+
+
+
+## Trace: 3.0.1 — measuring the thing the objective actually claims
+
+**The gap.** Every number this project has published measures recall: is the
+needle string in the context. That answers "did the evidence arrive", not "can the
+model answer". A question needing three facts that receives two scores 0.667
+recall and is unanswerable — the model either refuses or invents the third. Under
+an objective that puts intelligence first, publishing a metric that cannot
+distinguish a usable context from an unusable one is the same error as graphify
+dividing by its own output: a number that looks like a result.
+
+**The metric.** `complete_of()` — every required fact present. It becomes a column
+in the bench and the sweep, and the knee is now measured on complete tasks rather
+than fractional recall, so "same hit count" means the same number of answerable
+questions.
+
+**What it found in the code, immediately.** `bench_rows` built its query from
+`needles[0]` alone. A multi-fact task's second fact was therefore never searched
+for, and any "complete" number would have measured luck rather than retrieval. The
+loop now searches every fact; the lookup tier applies only to single-fact
+questions, where there is a phrase to match verbatim.
+
+**What it measured.** Question set (14 tasks, four multi-fact), budget 1,000:
+
+| policy | complete | tokens | over budget |
+| --- | --- | --- | --- |
+| intelligence | **1.000** | 807 | 0/14 |
+| grep | 1.000 | 686 | 2/14 |
+| lean | **0.643** | 338 | 0/14 |
+
+On the identifier sets, intelligence reaches 0.940 (normal) and 1.000 (code-only)
+complete against lean's 0.720 and 0.620.
+
+**The claim this supports.** Not "a bigger number on the same benchmark", but: on
+questions that need several facts assembled from one or more files, the protocol
+answers all of them within budget while a token-first baseline answers 9 of 14.
+That is the difference between a context most of the evidence reached and a
+context the question can be answered from.
+
+**What it does not support.** `grep` also scores 1.000 complete on the question
+set, because a six-file fixture makes whole-file grep affordable. The claim is
+about the protocol against a *bounded* baseline, and on a corpus where grep fits,
+grep is fine. The 50-query identifier sets are where that stops being true: grep
+blows the budget on 48–49 of 50.
+
+**The knee, on all three sets.** Identifier 1,000, code-only 800, questions
+1,000. The shipped default of 1,000 is the largest, so the strictest set set it.
+
+**What 3.0.1 will never show:** whether a model *actually answers better*. That
+needs a model, and this project has no way to run one in CI. Complete is the
+strongest mechanical proxy available: a model cannot answer from facts it was
+never given, and it can answer from facts it was.

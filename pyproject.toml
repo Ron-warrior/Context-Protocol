@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "context-protocol"
-version = "3.0.0"
+version = "3.0.1"
 description = "Rank, map and scope a codebase for a question under a token budget. No dependencies, stdlib only."
 readme = "README.md"
 requires-python = ">=3.9"

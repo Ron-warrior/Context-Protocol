@@ -718,3 +718,45 @@ carry the block that holds it. That is a single query inside the interval, and
 Whether to spend 3,000 more tokens per query to recover that one answer is the
 trade the objective settles: intelligence first, then tokens *subject to it*. The
 intelligence did not change (0.940 either way); the tokens did. Kept at 1,000.
+
+
+
+## 3.0.1 — the metric that measures intelligence, and what it says
+
+Recall counts facts present. **Complete** counts questions that can actually be
+answered — every required fact present. A question needing three facts that
+receives two is not two-thirds answered; it is answered wrongly, or the model
+invents the missing part.
+
+Four multi-fact tasks were added to the question set (14 tasks now, three of them
+spanning files). CI, budget 1,000:
+
+| set | policy | complete | tokens | over |
+| --- | --- | --- | --- | --- |
+| questions (14) | **intelligence** | **1.000** | 807 | 0/14 |
+| questions (14) | grep | 1.000 | 686 | **2/14** |
+| questions (14) | lean | 0.643 | 338 | 0/14 |
+| identifier (50) | intelligence | 0.940 | 922 | – |
+| identifier (50) | lean | 0.720 | 749 | – |
+| code-only (50) | intelligence | 1.000 | 985 | – |
+| code-only (50) | lean | 0.620 | 985 | – |
+
+**The measured claim: on question-shaped tasks the protocol answers 1.000 of the
+questions a token-first baseline answers 0.643 of.** That is the "more intelligent
+than base" evidence — not a bigger number on the same benchmark, but a different
+thing being measured, where base loses 5 of 14 questions outright because it
+never assembles the facts together.
+
+`grep` matches complete 1.000 on this set, and that is honest: the fixture is six
+files, so whole-file grep is affordable. It does not survive the 50-query
+identifier sets at the same budget, where it blows the budget on 48–49 of 50.
+
+**The knee holds on all three sets** — identifier 1,000, code-only 800,
+questions 1,000. The shipped default of 1,000 is the largest, so it is the
+strictest set that set it.
+
+**A defect the metric found immediately.** `bench_rows` built its query from
+`needles[0]` alone, so a multi-fact task's second fact was never searched for and
+"complete" would have measured luck. It now searches every fact, and applies the
+lookup tier only to single-fact questions, where there is a phrase to match
+verbatim.

@@ -4,7 +4,7 @@ How an agent should spend tokens inside a codebase: rank the files for the
 question, read the block that answers it, and measure whether the answer arrived.
 Evidence in FINDINGS.md, the trace in TRACE.md, the numbers in SCOREBOARD.md.
 
-Version: 3.0.0 — intelligence first, then tokens, then speed
+Version: 3.0.1 — intelligence first, then tokens, then speed
 
 ---
 
@@ -27,7 +27,7 @@ ctx ask "how are errors handled"       # path defaults to .
 ctx query . "auth refresh" --explain   # why each file ranked
 ctx path User Store                    # files mentioning both
 ctx map .                              # file map with line counts
-ctx bench . --queries 100              # recall, then tokens, then ms
+ctx bench . --queries 100              # recall, complete answers, tokens, ms
 ctx bench . --sweep 1000,2000,4000     # recall per budget, and the knee
 ctx bench . --ablate                   # what each phase costs
 ctx bench . --queries eval/tasks.json  # question-shaped, not only lookups
