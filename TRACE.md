@@ -1004,3 +1004,69 @@ Default and normal recall also rise, since the same identifiers appear in their
 needle sets. Tokens change little. If recall does not move, the rank positions
 were not caused by partial-word outscoring and the next suspect is phase
 allocation — breadth-first emission instead of four blocks for one file.
+
+
+
+## Trace: 2.25.0 — measured
+
+| set | recall | tokens | over |
+| --- | --- | --- | --- |
+| normal | 0.940 | 3,212 | – |
+| hard | 1.000 | 2,945 | – |
+| hard, code-only | 1.000 | 3,698 | – |
+
+`next` reports **0 misses** on both the default and the code-only set, and
+`diagnose` reports 0 as well. Every generated query returns its answer text.
+
+The prediction held: code-only hard 0.960 → 1.000, the three never-reached
+needles moved to the top, the other rates rose, and tokens did not move at all
+(3,212 before and after). Ranking, not emission, was the whole of the remaining
+gap.
+
+**What it means, stated carefully.** This is not "retrieval is solved". The
+generated queries are single identifiers, and the lookup tier now answers 100% of
+single-identifier queries on this corpus. The 0.940 normal figure is the honest
+headline for a mixed set. What the result does say is that the last four misses
+were not about block selection, budget, or the phases — they were the ranking
+putting the right file in the wrong place.
+
+## Trace: 2.26.0 — the interval that never moved
+
+**The bug.** Reading 2.25.0's own table, every row printed the same 95% interval:
+`(0.002-0.054)` for recall 1.000 and for 0.940 alike. The call site passed a
+proportion where `wilson` expects a count of successes:
+
+    low, high = wilson(mean_recall, len(queries))   # 0.94 / 100, twice
+
+So `wilson` divided by the total a second time and centred the interval near
+0.009. The guard that was added to stop this project calling a one-query change a
+result had never worked, in any version since it was written. It printed a
+plausible-looking bracket that no reader could have caught without comparing two
+rows.
+
+Fixed by passing `round(mean_recall * len(queries))`. The selftest now pins three
+points — 94/100, 100/100, 0/100 — so an interval that does not move fails the
+build.
+
+**Why it survived.** Nothing tested the call site. The function was correct; the
+argument was wrong; and the output looked like an interval. This is the same
+failure as 2.19.0 in miniature: a component that reports, attached to a caller
+nobody checked.
+
+**The second half of 2.26.0.** The user's goal was that a weaker model could
+reach the same standard by following the protocol. That is only a claim until it
+is measurable, so this version adds the measurement:
+
+- `eval/tasks.json` — ten questions over a six-file fixture corpus, with
+  hand-written exact-string answers. Ground truth that does not move when `ctx`
+  changes, because it is not derived from `ctx`.
+- `eval/score.py` — scores a submission of *ranges the model actually read*
+  against those answers, reports recall and tokens, and optionally scores `ctx`
+  itself on the same tasks so the comparison is mechanical.
+- `SKILL.md` Mode 4 — the four failure modes observed in this project, each with
+  the check that catches it, and five steps that each produce an artifact.
+
+**What is not claimed.** No weaker model has been run against the suite in this
+session. The suite makes the claim testable; it does not make it true. The
+distinction matters because "a weaker model reaches this level" is exactly the
+kind of sentence this project keeps catching itself writing.

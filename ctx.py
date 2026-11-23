@@ -51,7 +51,7 @@ PROSE_EXT = {".md", ".rst", ".txt"}
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "2.25.0"
+__version__ = "2.26.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -1127,7 +1127,12 @@ def cmd_bench(args) -> int:
 
     for mean_recall, mean_tokens, over, mean_ms, name in rows:
         flag = f"{over}/{len(queries)}" if over else "-"
-        low, high = wilson(mean_recall, len(queries))
+        # `mean_recall` is a proportion; `wilson` wants a count of successes and
+        # divides by the total itself. Passing the proportion made it divide by
+        # 100 twice, so every row printed an interval centred near 0.009 — the
+        # same (0.002-0.054) for recall 1.000 and 0.940 — which silently disabled
+        # the guard against calling one query a result.
+        low, high = wilson(round(mean_recall * len(queries)), len(queries))
         print(
             f"| {name} | {mean_recall:.3f} ({low:.3f}-{high:.3f}) | "
             f"{mean_tokens:.0f} | {flag} | {mean_ms:.1f} |"
@@ -1391,6 +1396,16 @@ def cmd_selftest(_args) -> int:
 
         assert tokens("abcd" * 10) == 10, "token estimate must be chars/4"
         checks += 1
+
+        # The interval has to move with the value, or it is decoration. 94 of 100
+        # is reported around 0.88-0.97, and a perfect score is still not certain.
+        lo, hi = wilson(94, 100)
+        assert 0.87 < lo < 0.91 and 0.96 < hi < 0.99, f"wilson(94,100) gave {lo:.3f}-{hi:.3f}"
+        lo, hi = wilson(100, 100)
+        assert 0.94 < lo < 0.99 and hi == 1.0, f"wilson(100,100) gave {lo:.3f}-{hi:.3f}"
+        lo, hi = wilson(0, 100)
+        assert lo == 0.0 and hi < 0.05, f"wilson(0,100) gave {lo:.3f}-{hi:.3f}"
+        checks += 3
 
         ranked = rank(files, ["refresh", "token"])
         assert ranked and ranked[0][1].path == "alpha.py", "definition-bearing file must rank first"

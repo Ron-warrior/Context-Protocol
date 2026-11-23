@@ -501,3 +501,40 @@ queries keep the ×3 verbatim multiplier.
 Prediction recorded before measuring: code-only hard recall from 0.960 toward
 0.99, the three needles at the top of the ranking, other rates up, tokens roughly
 flat.
+
+
+
+## 2.25.0 — measured
+
+| set | recall | tokens | over |
+| --- | --- | --- | --- |
+| normal | 0.940 | 3,212 | – |
+| hard | 1.000 | 2,945 | – |
+| hard, code-only | 1.000 | 3,698 | – |
+
+`next`: 0 misses on both sets. The lookup tier took code-only hard from 0.960 to
+1.000 and moved the three "never reached" needles to the top, at exactly the same
+token cost (3,212 before and after) — the whole remaining gap was ranking
+position, not budget or block selection.
+
+Caveat worth keeping: the generated queries are identifiers, so 1.000 says every
+single-identifier lookup on this corpus is answered. The mixed set's 0.940 is the
+honest headline.
+
+## 2.26.0 — the interval that never moved, and a suite a weaker model can fail
+
+**Bug fixed.** The 95% interval printed identically for recall 1.000 and 0.940 —
+`(0.002-0.054)` every row. The call site passed a proportion where `wilson`
+expects a success count, so it divided by the query total twice and centred the
+interval near 0.009. The guard against calling a one-query change a result had
+never actually worked. The selftest now pins 94/100, 100/100 and 0/100.
+
+**Added.** `eval/tasks.json` and `eval/score.py`: ten hand-written questions over
+a six-file fixture corpus, scored against *the ranges a model actually read*, with
+`ctx` scored on the same tasks for comparison. `SKILL.md` Mode 4 states the four
+failure modes observed in this project — miscounting your own output, quoting a
+number before measuring, asserting a bug that is not there, shipping a check that
+never fires — each with the check that catches it.
+
+**Not claimed.** No weaker model has been run against the suite. The suite makes
+the claim testable; it does not make it true.

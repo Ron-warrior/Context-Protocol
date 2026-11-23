@@ -101,6 +101,52 @@ Recall per 1k tokens, at several budgets, with each ranking claim switchable off
 so it can lose. Current numbers on a 795-file corpus and the failures behind them
 are in `TRACE.md` and `SCOREBOARD.md`.
 
+## Mode 4 — prove it (read this first if you skip steps)
+
+A weaker model does not fail because it knows less. It fails by skipping a step
+and then describing the skip as a result. This protocol was built by a model that
+did exactly that, in the session that wrote this section:
+
+| Failure | What it looked like here | The check that catches it |
+| --- | --- | --- |
+| Miscounting its own output | "5 + 2 + 2" for a list that was 5, 2 and 3 | Recount from the printed list, never from memory |
+| Quoting a number before measuring | A recall figure from an older run, presented as this one's | Every number needs its command and output beside it |
+| Asserting a bug that was not there | "this compares characters to tokens", without quoting the line | Quote the line and its units before calling it a bug |
+| Shipping a check that never fired | An interval printed identically for 0.94 and 1.00 | Prove the check moves when the input moves |
+
+Five rules, in order. Each has an artifact, so "did I do it" is a file, not a
+feeling.
+
+1. **Write the question as one line, before searching.** If you cannot say what
+   the answer would look like, you are about to read files to feel productive.
+2. **One search, then one read.** `grep -rl` for the keywords, pick the definition
+   over the usage, then read the enclosing block of the best hit. A second search
+   is allowed only after the first read missed, and you must say what it missed.
+3. **Every claim carries its evidence on the same line.** Not "tests pass" but
+   the command and its exit code. Not "recall improved" but the two tables. If
+   you cannot paste it, do not write it.
+4. **Submit what you read, not what you concluded.** A conclusion is not
+   checkable; a range is.
+5. **Score it, and compare against the tool.**
+
+```bash
+python3 eval/score.py --submission mine.json --baseline
+```
+
+A submission is the ranges you actually put in front of yourself:
+
+```json
+{"ranges": [{"path": "service/auth.py", "start": 1, "end": 20}]}
+```
+
+Lines are 1-based and inclusive. The scorer checks the hand-written answers in
+`eval/tasks.json` against your text and reports recall, tokens and recall per
+1k, then does the same for `ctx` itself so the comparison is not a feeling.
+
+**Do not tune to the tasks.** Ten questions over six files is a smoke test for
+method, not a benchmark of a corpus. If you find yourself reading `tasks.json`
+before `service/auth.py`, you have inverted the exercise.
+
 ## Rules that are not negotiable
 
 - An unverified edit is a claim, not a change.

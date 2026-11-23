@@ -1,0 +1,55 @@
+{
+  "corpus": "eval/fixtures/ladder",
+  "tasks": [
+    {
+      "question": "What is the default maximum request body size in megabytes?",
+      "answer": "MAX_BODY_MB = 8",
+      "answer_path": "config/defaults.py"
+    },
+    {
+      "question": "How many attempts does the retry helper make before giving up?",
+      "answer": "MAX_ATTEMPTS = 5",
+      "answer_path": "service/retry.py"
+    },
+    {
+      "question": "Which HTTP header carries the session token?",
+      "answer": "X-Session-Token",
+      "answer_path": "service/auth.py"
+    },
+    {
+      "question": "Which function extends a live session by another TTL?",
+      "answer": "def refresh_session",
+      "answer_path": "service/auth.py"
+    },
+    {
+      "question": "What status code does the router return for an unknown route?",
+      "answer": "NOT_FOUND_CODE = 404",
+      "answer_path": "config/defaults.py"
+    },
+    {
+      "question": "What is the base delay of the retry backoff, in seconds?",
+      "answer": "BACKOFF_BASE_S = 0.4",
+      "answer_path": "service/retry.py"
+    },
+    {
+      "question": "In which file are session records persisted?",
+      "answer": "sessions.db",
+      "answer_path": "service/storage.py"
+    },
+    {
+      "question": "What exception is raised when the store cannot be parsed?",
+      "answer": "StorageCorrupt",
+      "answer_path": "service/storage.py"
+    },
+    {
+      "question": "Which class implements the per-user token bucket?",
+      "answer": "class RateLimiter",
+      "answer_path": "service/storage.py"
+    },
+    {
+      "question": "What should be done with the writer when the volume is full?",
+      "answer": "freeze the writer",
+      "answer_path": "docs/runbook.md"
+    }
+  ]
+}

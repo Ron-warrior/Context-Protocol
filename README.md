@@ -8,7 +8,7 @@ This is the root README on purpose. It is the only file loaded into every chat o
 this project, so it is the only place a rule can live and actually take effect.
 Everything else is loaded on demand — which is also rung 1.
 
-Version: 2.25.0 — the objective is ordered: intelligence, then tokens, then speed
+Version: 2.26.0 — the objective is ordered: intelligence, then tokens, then speed
 
 ---
 
@@ -38,6 +38,7 @@ ctx bench . --queries 100 --floor .75 # exit 1 if recall drops below the floor
 ctx next . --queries 100             # the misses, resolved to file:line
 ctx plan                             # the ladder as a checklist
 ctx selftest                         # fixtures; exit 0 means it works
+python3 eval/score.py --submission mine.json --baseline  # score what you read
 ```
 
 Per-project defaults live in `.ctxrc` (`budget=6000`, `expand=off`); `.gitignore`
