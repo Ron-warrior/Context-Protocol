@@ -105,6 +105,10 @@ jobs:
       - name: The repository that has not started
         run: |
           set -uo pipefail
+          # The runner's shell starts with -e, and the two cases under test exit 1
+          # on purpose, so -e has to go or the step dies at the first one and never
+          # reaches its own checks. Every status is inspected below instead.
+          set +e
           # Both cases exit 1 by design -- no context was produced -- so the point
           # is not the status but the message: a typo and a greenfield project must
           # not answer the same way, or the tool says nothing to anyone starting one.
