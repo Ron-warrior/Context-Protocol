@@ -941,6 +941,27 @@ def cmd_map(args) -> int:
     return 0
 
 
+def rc_budget(rc: dict[str, str], fallback: int = 1000) -> int:
+    """The budget from `.ctxrc`, or the fallback when it is not a usable integer.
+
+    A typo in `.ctxrc` used to raise `ValueError` and take the command down with a
+    traceback. A config file is user input, so a bad value should say what is wrong
+    and fall back rather than crash. Reported as issue #1 by JONIMONI09.
+    """
+    raw = rc.get("budget")
+    if raw is None:
+        return fallback
+    try:
+        value = int(raw)
+    except ValueError:
+        print(f".ctxrc: budget={raw!r} is not an integer; using {fallback}", file=sys.stderr)
+        return fallback
+    if value <= 0:
+        print(f".ctxrc: budget={value} must be positive; using {fallback}", file=sys.stderr)
+        return fallback
+    return value
+
+
 def cmd_query(args) -> int:
     corpus = Corpus(load(Path(args.path)))
     files = corpus.files
@@ -966,7 +987,7 @@ def cmd_query(args) -> int:
             print(f"{score:8.2f}  {source.path}", file=sys.stderr)
     started = time.perf_counter()
     rc = load_rc(Path(args.path))
-    budget = args.budget if args.budget is not None else int(rc.get("budget", "1000"))
+    budget = args.budget if args.budget is not None else rc_budget(rc)
     expand = args.expand
     if rc.get("expand", "").lower() in {"off", "false", "0", "no"}:
         expand = False
@@ -1542,6 +1563,13 @@ def cmd_selftest(_args) -> int:
     words = words_of("where is the refresh token")
     assert "refresh" in words and "the" not in words, f"stopwords leaked: {words}"
     checks += 1
+
+    # A `.ctxrc` typo must not crash the command (#1, JONIMONI09).
+    assert rc_budget({"budget": "lots"}) == 1000, "a non-integer budget falls back"
+    assert rc_budget({"budget": "-5"}) == 1000, "a negative budget falls back"
+    assert rc_budget({}) == 1000, "a missing budget uses the default"
+    assert rc_budget({"budget": "2500"}) == 2500, "a valid budget is honoured"
+    checks += 4
 
     # A sweep only changes the default when the smaller budget keeps the hits.
     assert knee_budget({500: 10, 2000: 40, 4000: 40}, [500, 2000, 4000]) == 2000, \

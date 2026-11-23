@@ -1256,3 +1256,21 @@ sweep says 1,000 holds recall on identifier queries; whether it holds on
 questions is being measured by the job this version added. Changing the default
 before that number exists would be choosing the smaller number because it is
 smaller.
+
+
+
+## Trace: issue #1, checked against the code rather than the report
+
+JONIMONI09 opened an issue with four findings, flagged as AI-generated and worth
+checking twice. Checked against the code at `0b03ad3`:
+
+| Finding | Verdict |
+| --- | --- |
+| `related()` assertion fails: `alpha.py` does not import anything | **Already fixed.** The selftest asserts `related(beta, index)`, where `beta` is the file that imports `alpha`. The report was against commit `17c0ce1`, four versions earlier. |
+| `.ctxrc` with a non-integer `budget` raises `ValueError` | **Real bug, fixed here.** `int(rc.get("budget", "1000"))` took the command down with a traceback. Now `rc_budget()` reports the bad value and falls back; four selftest cases cover non-integer, negative, missing and valid. |
+| `enclosing_block()` boundaries are heuristic | **Declined, with reason.** The block is deliberately re-anchored so the matched line is never cut out, and capped at `MAX_BODY_LINES`. "Cut off longer functions" is the intended trade: an AST-aware variant would be a behaviour change needing its own measurement, not a bug fix. |
+| Benchmarks should add multi-term or description-to-symbol queries | **Already addressed.** 2.29.0 added `ctx bench --queries <file>`, and `eval/tasks.json` is a hand-written question set beside the identifier queries. |
+
+One of four was a live defect. The other three were correct observations about an
+older commit, a design choice, and something already built — which is the value of
+checking a report against the code instead of accepting or dismissing it whole.
