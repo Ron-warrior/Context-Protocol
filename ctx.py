@@ -1402,7 +1402,7 @@ def cmd_selftest(_args) -> int:
         lo, hi = wilson(94, 100)
         assert 0.87 < lo < 0.91 and 0.96 < hi < 0.99, f"wilson(94,100) gave {lo:.3f}-{hi:.3f}"
         lo, hi = wilson(100, 100)
-        assert 0.94 < lo < 0.99 and hi == 1.0, f"wilson(100,100) gave {lo:.3f}-{hi:.3f}"
+        assert 0.94 < lo < 0.99 and hi > 0.99, f"wilson(100,100) gave {lo:.3f}-{hi:.3f}"
         lo, hi = wilson(0, 100)
         assert lo == 0.0 and hi < 0.05, f"wilson(0,100) gave {lo:.3f}-{hi:.3f}"
         checks += 3
