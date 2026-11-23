@@ -88,19 +88,27 @@ jobs:
       # Measurement comes before installation on purpose. Twice now the install
       # step failed and took the benchmark down with it, which meant the run
       # reported a defect but produced no numbers to act on.
-      - name: Query this repository
+      - name: Exercise every command
         run: |
           set -euo pipefail
+          # Each documented command runs at least once, so "finished" means every
+          # one of them was actually executed somewhere.
+          python3 ctx.py --version
+          python3 ctx.py map . | head -n 3
+          python3 ctx.py plan
           python3 ctx.py query . "how does the ladder rank files" --explain
           python3 ctx.py query . "how does the ladder rank files" --rank-only
+          python3 ctx.py query . "how does the ladder rank files" --json > /dev/null
           python3 ctx.py ask "how does the ladder rank files" --budget 2000
+          python3 ctx.py path refresh token
+          python3 ctx.py selftest
       - name: Bench this repository (intelligence vs lean)
         run: |
           set -uo pipefail
           # A green run reports nothing back to whoever is deciding; a red one
           # prints every number. So the floor is the reporting channel, not just a
-          # guard: measured basis is 0.790 recall at 100 queries, budget 4000 on
-          # this corpus, and 0.75 is the line below which a version has regressed.
+          # guard: 0.75 is the line below which a version has regressed. The bench
+          # runs at the default budget, which 3.0.0 set to the measured knee.
           python3 ctx.py bench . --queries 100 --floor 0.75 > bench-self.txt 2>&1
           status=$?
           cat bench-self.txt
