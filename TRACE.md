@@ -1070,3 +1070,56 @@ is measurable, so this version adds the measurement:
 session. The suite makes the claim testable; it does not make it true. The
 distinction matters because "a weaker model reaches this level" is exactly the
 kind of sentence this project keeps catching itself writing.
+
+
+
+## Trace: 2.27.0 — the model that wrote the protocol, scored against it
+
+**What prompted this.** The user pointed out that the model doing this work — the
+one that built 2.22.0 through 2.26.0 — is the weaker model, after the stronger one
+ran out of usage partway through. Taken at face value, that means 2.26.0's Mode 4
+was written by its own target audience, and this session is the first subject.
+
+That is worth recording before it is smoothed over. Mode 4 lists four failure
+modes. Here is how the model performed against them in the session that wrote
+them:
+
+| Mode 4 failure | Occurrences | What it actually wrote |
+| --- | --- | --- |
+| Miscounting its own output | 1 | "6 + 2 + 2" for a list that was 5 + 2 + 3, minutes after the tool printed it |
+| Quoting a number before measuring | 1 | 0.960 described as 2.24.0's hard recall; it was the code-only figure, hard was 0.980 |
+| Asserting a bug that was not there | 1 | `too_big` "compares characters to tokens"; the units were consistent and nothing was changed |
+| Shipping a check that never fired | 1 | The wilson call site, wrong since it was written, printing an identical bracket for 0.940 and 1.000 |
+| Over-specifying a test | 1 | `hi == 1.0` for a float that returns 0.999999; caught by CI in 6s |
+
+**Five violations, four of them in work this model wrote itself.** Two of them —
+the miscount and the false bug report — were caught by reading back. One was
+caught by CI. One was caught only because the user asked a question that made the
+model re-read an old claim. And one, the wilson bug, was caught by noticing that
+two rows of a table disagreed.
+
+**What that says about Mode 4.** Rules with an artifact caught the error. "Recount
+from the printed list" and "quote the line and its units" worked: the model
+applied them and corrected itself. "Prove the check moves when the input moves"
+did not, because nothing forced the comparison — it required noticing.
+
+So the fix is not another rule. It is removing the need to notice.
+
+**The change.** `brackets(interval, value)` states one invariant: an interval must
+contain the value it describes. It is enforced in two places:
+
+- The selftest pins eight proportions (0, 1, 13, 50, 87, 94, 99, 100 of 100) and
+  requires every interval to contain its own value.
+- `ctx bench` checks it on every row it prints and **exits 1** if any row's
+  interval excludes its recall, refusing to summarise the table. A statistic that
+  does not describe its own value is not a result, and the job should say so
+  rather than leave the number on a page to be quoted later.
+
+With the 2.26.0 bug in place, both would have failed on the first run: recall
+0.940 printed beside (0.002-0.054).
+
+**What this does not claim.** N = 1, self-scored, on tasks this model wrote. It is
+an anecdote with exact counts, not a benchmark of DeepSeek or of any model. What
+it does establish is that the failure modes Mode 4 names are real, they occur at
+roughly one per version in ordinary work, and that a check has to be mechanical to
+survive them.

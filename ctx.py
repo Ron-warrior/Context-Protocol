@@ -51,7 +51,7 @@ PROSE_EXT = {".md", ".rst", ".txt"}
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "2.26.0"
+__version__ = "2.27.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -846,6 +846,18 @@ def wilson(successes: float, total: int, z: float = 1.96) -> tuple[float, float]
     return max(0.0, centre - margin), min(1.0, centre + margin)
 
 
+def brackets(interval: tuple[float, float], value: float, slack: float = 1e-6) -> bool:
+    """True when an interval contains the value it is meant to describe.
+
+    The invariant 2.26.0's bug broke: recall 0.940 was printed beside the interval
+    (0.002-0.054), and nothing complained because the bracket looked like a
+    bracket. A statistic attached to a caller nobody verified is exactly the
+    defect that survives versions, so the check lives at both ends — in the
+    selftest, and in the bench that prints it.
+    """
+    return interval[0] - slack <= value <= interval[1] + slack
+
+
 def auto_queries(
     files: list[Source], count: int, seed: int = 0, rare: int = 2, code_only: bool = False
 ) -> list[dict]:
@@ -1125,6 +1137,7 @@ def cmd_bench(args) -> int:
     within.sort(key=lambda row: (-row[0], row[1], row[3]))
     rows.sort(key=lambda row: (-row[0], row[1], row[3]))
 
+    misreported = 0
     for mean_recall, mean_tokens, over, mean_ms, name in rows:
         flag = f"{over}/{len(queries)}" if over else "-"
         # `mean_recall` is a proportion; `wilson` wants a count of successes and
@@ -1133,10 +1146,25 @@ def cmd_bench(args) -> int:
         # same (0.002-0.054) for recall 1.000 and 0.940 — which silently disabled
         # the guard against calling one query a result.
         low, high = wilson(round(mean_recall * len(queries)), len(queries))
+        if not brackets((low, high), mean_recall):
+            print(
+                f"BUG: {name} recall {mean_recall:.3f} falls outside its own "
+                f"interval {low:.3f}-{high:.3f}",
+                file=sys.stderr,
+            )
+            misreported += 1
         print(
             f"| {name} | {mean_recall:.3f} ({low:.3f}-{high:.3f}) | "
             f"{mean_tokens:.0f} | {flag} | {mean_ms:.1f} |"
         )
+
+    # A table whose statistics do not describe their own values is not a result.
+    # Refusing to summarise it is the only honest response, and it fails the job
+    # rather than leaving the numbers on the page to be quoted later.
+    if misreported:
+        print(f"\n{misreported} row(s) reported an interval that excludes their recall",
+              file=sys.stderr)
+        return 1
 
     print(f"\nbest within budget (recall, then tokens, then ms): {within[0][4]}")
 
@@ -1405,7 +1433,13 @@ def cmd_selftest(_args) -> int:
         assert 0.94 < lo < 0.99 and hi > 0.99, f"wilson(100,100) gave {lo:.3f}-{hi:.3f}"
         lo, hi = wilson(0, 100)
         assert lo == 0.0 and hi < 0.05, f"wilson(0,100) gave {lo:.3f}-{hi:.3f}"
-        checks += 3
+        # The invariant that 2.26.0 broke. If the interval does not contain the
+        # value it describes, every table in this project is decoration.
+        for successes in (0, 1, 13, 50, 87, 94, 99, 100):
+            interval = wilson(successes, 100)
+            assert brackets(interval, successes / 100), \
+                f"wilson({successes},100) gave {interval} which excludes {successes / 100:.2f}"
+        checks += 4
 
         ranked = rank(files, ["refresh", "token"])
         assert ranked and ranked[0][1].path == "alpha.py", "definition-bearing file must rank first"

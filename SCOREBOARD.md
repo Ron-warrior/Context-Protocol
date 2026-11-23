@@ -538,3 +538,31 @@ never fires — each with the check that catches it.
 
 **Not claimed.** No weaker model has been run against the suite. The suite makes
 the claim testable; it does not make it true.
+
+
+
+## 2.27.0 — the check has to be mechanical
+
+The model that built 2.22.0–2.26.0 is the weaker one, switched in when the
+stronger model ran out of usage. So Mode 4 was written by its own target audience,
+and this session is the first subject. Scored against Mode 4's own four failure
+modes:
+
+| Failure | Count | Example |
+| --- | --- | --- |
+| Miscounted its own output | 1 | "6+2+2" for a list that was 5+2+3 |
+| Quoted a number before measuring | 1 | 0.960 called hard recall; it was code-only |
+| Asserted a bug that was not there | 1 | `too_big` units, which were consistent |
+| Shipped a check that never fired | 1 | wilson call site, wrong for several versions |
+| Over-specified a test | 1 | `hi == 1.0` on 0.999999 |
+
+Five in one session. Two were caught by read-back, one by CI, one by the user
+asking a question, one by noticing two rows differed. Only the last kind is
+unreliable, and it is the kind that mattered most.
+
+**Change.** `brackets(interval, value)` — an interval must contain the value it
+describes — enforced in the selftest over eight proportions, and in `ctx bench` on
+every printed row, where a violation exits 1 and refuses to summarise the table.
+
+**Not claimed.** N = 1, self-scored, on tasks this model wrote. Exact counts of an
+anecdote, not a benchmark.
