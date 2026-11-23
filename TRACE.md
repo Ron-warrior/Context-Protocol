@@ -1328,3 +1328,51 @@ blows the budget on 48–49 of 50.
 needs a model, and this project has no way to run one in CI. Complete is the
 strongest mechanical proxy available: a model cannot answer from facts it was
 never given, and it can answer from facts it was.
+
+
+
+## Trace: 3.0.2 — the repository that has not started
+
+**The question this answers.** Does this tool do anything for a repository with
+no files yet? A greenfield session is the one where the shape of everything that
+follows is set, so a tool that has nothing to say there is missing its cheapest
+opportunity.
+
+**What it did before.** Every content command — `map`, `query`/`ask`, `path`,
+`bench`, `next` — answered the same way:
+
+```
+$ ctx map .
+no source files
+$ echo $?
+1
+```
+
+A mistyped path and an empty directory produced that same line, so the user
+learned neither which failure it was nor what to do next. On a project that has
+not started, that reads as "this tool does not apply to me", which is wrong: the
+half of the protocol that is not retrieval applies most sharply there.
+
+**What changed.** `empty_corpus()` separates the two. A path that does not exist
+is named as one. An empty one says retrieval starts at rung 1 while rung 0
+applies now, and points at `ctx plan`. That command loads no files — it already
+worked on an empty directory — and now names the rungs that apply at zero files,
+plus the two things worth writing before there is code: the frame and the
+acceptance check, and a `.ctxrc`.
+
+**What is honestly true.** At zero files the retrieval half does nothing,
+because there is nothing to rank. What is useful before the first source file is
+the rest: frame the question (rung 0), and persist the frame, the acceptance
+check and the budget (rung 7), so the next session reads an answer instead of
+inferring one. That is a claim about the protocol. It is not measured, and this
+trace does not pretend otherwise.
+
+**What it does not measure.** Whether starting a repository this way produces
+fewer defects is not something a retrieval benchmark can see. The claim here is
+narrow and checkable: `ctx` no longer answers two different situations with the
+same unhelpful line, and neither of them raises.
+
+**Verified by.** Two new selftest assertions — `load()` on an empty directory and
+on a missing path both return zero files rather than raising — and the CI step
+*The repository that has not started*, which runs both cases and fails if either
+message regresses or the exit code stops being 1.

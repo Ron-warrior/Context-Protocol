@@ -51,7 +51,7 @@ PROSE_EXT = {".md", ".rst", ".txt"}
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "3.0.1"
+__version__ = "3.0.2"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -946,11 +946,31 @@ def phases_of(spec: str | None) -> set[str] | None:
     return wanted
 
 
+def empty_corpus(path: Path | str) -> int:
+    """Say why there is nothing to rank, and what to do about it.
+
+    A mistyped path and a repository that has no code yet are different failures,
+    and "no source files" distinguished neither. Both exit 1, because no context
+    was produced; they differ in what the user should do next. One is a typo. The
+    other is a project that has not started, where the retrieval half genuinely
+    has nothing to do and the rest of the protocol still applies.
+    """
+    root = Path(path)
+    if not root.exists():
+        print(f"ctx: {root} does not exist", file=sys.stderr)
+        return 1
+    print(
+        f"no source files under {root} yet -- nothing to rank.\n"
+        "Retrieval starts at rung 1; rung 0 applies now. `ctx plan` lists it.",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def cmd_map(args) -> int:
     files = load(Path(args.path))
     if not files:
-        print("no source files", file=sys.stderr)
-        return 1
+        return empty_corpus(args.path)
     for source in sorted(files, key=lambda f: -len(f.text)):
         print(f"{len(source.text.splitlines()):6d}  {source.path}")
     print(f"\n{len(files)} files", file=sys.stderr)
@@ -982,8 +1002,7 @@ def cmd_query(args) -> int:
     corpus = Corpus(load(Path(args.path)))
     files = corpus.files
     if not files:
-        print("no source files", file=sys.stderr)
-        return 1
+        return empty_corpus(args.path)
     words = words_of(args.question)
     if getattr(args, "rank_only", False):
         # The ranking without the content: for an agent that wants to choose its
@@ -1051,8 +1070,7 @@ def cmd_path(args) -> int:
     """
     files = load(Path(args.path))
     if not files:
-        print("no source files", file=sys.stderr)
-        return 1
+        return empty_corpus(args.path)
     first, second = args.a.lower(), args.b.lower()
     found = 0
     for source in files:
@@ -1091,6 +1109,11 @@ def cmd_plan(_args) -> int:
     for rung in LADDER:
         print(f"  [ ] {rung}")
     print("\nStop: ~1k tokens per question. Two misses means change rung, not read a third file.")
+    print(
+        "\nNo files yet? Rungs 0, 5, 6 and 7 apply; 1-4 need something to rank.\n"
+        "Write the frame and the acceptance check into the repo, plus a `.ctxrc`,\n"
+        "before the first source file -- rung 7, applied to the plan."
+    )
     return 0
 
 
@@ -1292,8 +1315,7 @@ def cmd_bench(args) -> int:
     corpus = Corpus(load(Path(args.path)))
     files = corpus.files
     if not files:
-        print("no source files", file=sys.stderr)
-        return 1
+        return empty_corpus(args.path)
     queries = queries_for(args, files)
     if not queries:
         print("no queries generated", file=sys.stderr)
@@ -1485,8 +1507,7 @@ def cmd_next(args) -> int:
     """
     corpus = Corpus(load(Path(args.path)))
     if not corpus.files:
-        print("no source files", file=sys.stderr)
-        return 1
+        return empty_corpus(args.path)
     queries = queries_for(args, corpus.files)
     if not queries:
         print("no queries generated", file=sys.stderr)
@@ -1640,6 +1661,15 @@ def cmd_selftest(_args) -> int:
             "the {question, needles} shape must load"
         assert queries_from_file(tasks)[0]["needles"] == ["sessions.db"], \
             "an {answer} task must become a needle"
+        checks += 2
+
+    # A path typo and a repository with no code both load to zero files, and the
+    # message that follows has to tell them apart. This asserts the load half: on
+    # a project that has not started, nothing may raise.
+    with tempfile.TemporaryDirectory() as bare_tmp:
+        bare = Path(bare_tmp)
+        assert load(bare) == [], "an empty directory is zero files, not an error"
+        assert load(bare / "missing") == [], "a missing path is zero files, not an error"
         checks += 2
 
     with tempfile.TemporaryDirectory() as tmp:

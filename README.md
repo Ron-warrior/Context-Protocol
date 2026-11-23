@@ -4,7 +4,7 @@ How an agent should spend tokens inside a codebase: rank the files for the
 question, read the block that answers it, and measure whether the answer arrived.
 Evidence in FINDINGS.md, the trace in TRACE.md, the numbers in SCOREBOARD.md.
 
-Version: 3.0.1 — intelligence first, then tokens, then speed
+Version: 3.0.2 — intelligence first, then tokens, then speed
 
 ---
 
@@ -13,14 +13,12 @@ Version: 3.0.1 — intelligence first, then tokens, then speed
 **In a chat.** Paste this repository's URL. The agent reads [`SKILL.md`](SKILL.md):
 three modes, none needing an install.
 
-**On a machine.**
+**On a machine.** Standard library only, no dependencies.
 
 ```bash
 pipx install git+https://github.com/Ron-warrior/Context-Protocol
 ctx query . "how are errors handled"
 ```
-
-Standard library only, no dependencies.
 
 ```bash
 ctx ask "how are errors handled"       # path defaults to .
@@ -58,6 +56,9 @@ One rung at a time; never start below the rung you can justify.
 5. **Write.** One function or section per write. Past ~120 lines you will not re-read it, and that is where the defects are.
 6. **Verify.** (a) Read back — the last operation on the region you edited must be a read, usually the diff, not the whole file. (b) Sweep every caller of every symbol you changed. (c) Run it — reading a line does not execute it.
 7. **Persist.** Write what you learned into the repo, not just the chat.
+
+Nothing to rank yet? Rungs 0, 5, 6 and 7 apply; 1–4 need something to rank. Write
+the frame, the acceptance check and a `.ctxrc` first — `ctx plan` needs no files.
 
 ## Hard rules
 

@@ -102,6 +102,34 @@ jobs:
           python3 ctx.py ask "how does the ladder rank files" --budget 2000
           python3 ctx.py path refresh token
           python3 ctx.py selftest
+      - name: The repository that has not started
+        run: |
+          set -uo pipefail
+          # Both cases exit 1 by design -- no context was produced -- so the point
+          # is not the status but the message: a typo and a greenfield project must
+          # not answer the same way, or the tool says nothing to anyone starting one.
+          empty="$(mktemp -d)"
+          out=$(python3 ctx.py map "$empty" 2>&1)
+          status=$?
+          echo "$out"
+          if [ "$status" -ne 1 ]; then
+            echo "an empty corpus must exit 1, got $status"; exit 1
+          fi
+          if ! echo "$out" | grep -q "rung 0 applies now"; then
+            echo "an empty corpus must point at rung 0"; exit 1
+          fi
+          out=$(python3 ctx.py map "$empty/nope" 2>&1)
+          status=$?
+          echo "$out"
+          if [ "$status" -ne 1 ]; then
+            echo "a missing path must exit 1, got $status"; exit 1
+          fi
+          if ! echo "$out" | grep -q "does not exist"; then
+            echo "a missing path must be named as one"; exit 1
+          fi
+          if ! python3 ctx.py plan | grep -q "No files yet"; then
+            echo "ctx plan must name the zero-file case"; exit 1
+          fi
       - name: Bench this repository (intelligence vs lean)
         run: |
           set -uo pipefail

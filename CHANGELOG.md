@@ -4,7 +4,7 @@ Three eras, three arguments. The detail lives in `TRACE.md` (why each version
 exists, what it measured, what it got wrong) and `SCOREBOARD.md` (the numbers,
 per version). This file is the map.
 
-## 3.0.0 — a finished product
+## 3.x — a finished product
 
 The version number stops describing a research project and starts describing a
 tool. What that means concretely:
@@ -20,6 +20,10 @@ tool. What that means concretely:
   put the knee at 1,000 tokens against a 4,000 default.
 - **The root README is within its own stated budget** (under ~100 lines), which
   `PROTOCOL.md` has required since 1.0.0 and the file had drifted past.
+- **3.0.1 — `complete` became the metric**, so a context holding two of three
+  facts is scored as the unanswerable context it is rather than as an average.
+- **3.0.2 — the empty repository** says which failure it is: a missing path, or a
+  project with no code yet, where the useful rungs are 0, 5, 6 and 7.
 
 ## 2.x — measurement
 

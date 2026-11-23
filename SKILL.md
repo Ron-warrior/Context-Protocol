@@ -55,6 +55,11 @@ Climb one rung at a time. Do not skip to a lower rung you cannot justify.
    if the project runs, run it.
 7. **Persist.** Write what you learned into the repo, not just the chat.
 
+Nothing to rank yet? Rungs 0, 5, 6 and 7 apply at zero files; 1–4 need something to
+rank. Write the frame, the acceptance check and a `.ctxrc` into the repo before the
+first source file — it is the cheapest thing you will ever write there, and every
+session after reads it. `ctx plan` prints the checklist with no files and no install.
+
 Stop: ~1k tokens of retrieval per question — the measured knee. Two misses means
 the strategy is wrong — search for the *definition*, not the *usage* — not that
 you need a fourth file.
