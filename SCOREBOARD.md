@@ -417,19 +417,55 @@ The six remaining misses, each blaming a different part of the pipeline:
 Four of six are ranking failures. Whatever else is true, emission is no longer the
 binding constraint and the next intelligence change belongs in `rank`.
 
-## 2.23.0 — architectural pass (measurement pending)
+## 2.23.0 — measured, and it broke its own budget
 
-Not yet measured. This row is filled from CI, not from intention, and is left empty
-on purpose until the run reports.
+| | recall | tokens | over budget |
+| --- | --- | --- | --- |
+| normal | 0.890 | 3,196 | 15/100 |
+| hard | 0.910 | 2,934 | 14/100 |
+| hard, code-only | 0.940 | 3,698 | 22/100 |
 
-Changed: `Corpus` owns the corpus and every index, so the call-site phase can no
-longer receive the stem index it had been searching since it was written;
-`plan_context` selects `Chunk` ranges and `render_context` renders them once; a block
-that does not fit is narrowed rather than dropped; identifiers are kept unsplit so a
-declared name resolves; the call-site phase works and is regression-tested; cost
-counts every label and the header, so **from this version the token column is the
-size actually emitted and is not comparable to 2.22.0's**; `ctx next` decides coverage
-by emitted range; `--phases` makes one phase attributable.
+Recall moved by one query on the hard set and not at all elsewhere — inside the
+interval, so not a result. `lean` moved the same way and overshot the same way
+(5/6/10 of 100).
 
-Not changed, on purpose: `rank`. The six misses above say ranking is now the binding
-constraint, and a change there has to be measured alone.
+**The regression.** `intelligence` exceeded its own budget on 14–22% of queries, so
+the bench's "best within budget" line no longer contained it and nominated
+`read_all` — a 1.9M-token corpus dump — as the winner. A policy that can win by
+failing its own budget check is precisely the failure mode this project exists to
+criticise, and I introduced it here.
+
+Cause: the gate charged each block a *floored* token count against `budget - 24`.
+Each floor loses up to one token, the `\n\n` separators between blocks were never
+counted at all, and a 24-token reserve is smaller than that loss once more than about
+ten blocks fit — which is exactly what per-block chunks caused. 2.24.0 counts
+characters and converts once.
+
+**The finding that mattered.** `ctx next` reclassified 7 of the 9 hard misses as
+"the line was emitted, and the needle sits past its 200-character cut". The blocks had
+been right for several versions; the per-line cap was discarding the word. Every
+earlier theory about block selection was chasing the wrong phase.
+
+## 2.24.0 — the line cap, and accounting that cannot drift
+
+Two fixes from 2.23.0's own instrument, and one methodological change:
+
+- **`clip_line` keeps the word, not the head of the line.** A long line is shortened
+  *around the earliest query word* instead of at column 200. Seven of nine hard
+  misses were that cut. Cap raised 200 → 240 characters, with `…` marking each cut.
+- **Budget accounting in characters.** The gate and `render_context` compute the same
+  expression, so a policy cannot report a size it did not emit. `over` should return
+  to 0 on every row.
+- **Wilson intervals in the bench.** At 100 queries one query is worth 0.010 recall,
+  and this project twice called a single query a result. The interval now prints
+  beside recall, so a one-query change is visibly inside it.
+- **`.gitignore` anchored patterns actually match.** `/build` was tested as
+  `str(rel).startswith("/build")`, which no relative path matches; every anchored
+  pattern was silently a no-op.
+- **The loop is enforced in CI.** Each run downloads the published 2.22.0 file and
+  runs its `next` on the current checkout, so "this version was built from the last
+  one's misses" is checkable rather than claimed.
+
+Not changed, on purpose: `rank`. Four of the six remaining code-only misses are still
+ranking failures at ranks 10–130, and that change has to be measured on its own.
+

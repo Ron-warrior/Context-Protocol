@@ -81,6 +81,8 @@ imports, then call sites of what it found. Blocks before maps, because an outlin
 tells you a name exists while a body answers the question. A block that does not
 fit the remaining room is narrowed to a smaller window around the same hit rather
 than dropped, so the last few hundred tokens still buy coverage instead of nothing.
+A line longer than 240 characters is shortened **around the word you asked about**,
+not at its start — the head of a long paragraph is the wrong end to keep.
 Cost is measured on the text actually emitted, labels and header included, so the
 `~N tokens` figure is the size of what you received. `--phases body,call` runs a
 subset of the phases, which is how a change is attributed to one of them. It never

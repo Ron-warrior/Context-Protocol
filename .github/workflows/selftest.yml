@@ -89,6 +89,21 @@ jobs:
           }
       - name: Self-test
         run: python3 ctx.py selftest
+      - name: The previous version, applied to this repository
+        run: |
+          set -euo pipefail
+          # The loop, enforced instead of narrated: fetch the *published* 2.22.0
+          # file and run its own `next` on this checkout. Its output is what 2.24.0
+          # was built from, and every future run keeps that receipt in the log.
+          # curl -f makes an unreachable file fail the job rather than quietly
+          # skipping the check that the loop actually closes.
+          curl -fsSL -o /tmp/ctx-2.22.0.py \
+            "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/5040f25/ctx.py"
+          python3 /tmp/ctx-2.22.0.py --version
+          echo "--- 2.22.0, applied to this repository ---"
+          python3 /tmp/ctx-2.22.0.py next . --queries 100 --rare 1 --code-only
+          echo "--- 2.24.0, on the same repository ---"
+          python3 ctx.py next . --queries 100 --rare 1 --code-only
       # Measurement comes before installation on purpose. Twice now the install
       # step failed and took the benchmark down with it, which meant the run
       # reported a defect but produced no numbers to act on.

@@ -898,3 +898,57 @@ comparable to 2.22.0's and the CI floor must be re-based from the new number rat
 than assumed. If recall falls, the shrink and call-site gains cost more than the
 labels they displaced, and `--phases body,excerpt` versus `body,excerpt,call` is the
 first comparison to run.
+
+
+
+## Trace: 2.24.0 — the line cap was the answer, and a budget bug I shipped
+
+**The loop, with receipts.** 2.23.0 was built from 2.22.0's `next`: six code-only
+misses, four of them ranking failures at ranks 10–130. 2.24.0 is built from 2.23.0's
+`next`, and that was only possible because 2.23.0's first act was to make one of its
+classifications reachable.
+
+**What 2.23.0 measured, including what it broke.** normal 0.890 / 3,196 / 15 over;
+hard 0.910 / 2,934 / 14 over; code-only 0.940 / 3,698 / 22 over. Recall moved by one
+query on one set — inside the interval, so not a result. The over-budget column is the
+story: `intelligence` failed its own budget check, so "best within budget" nominated
+`read_all`, a 1.9M-token corpus dump.
+
+The defect was in the accounting, not the corpus. The gate charged *floored* per-block
+token counts against `budget - 24`. Each floor loses up to one token, the `\n\n`
+between blocks was never counted, and 24 tokens of reserve is less than that loss once
+about ten blocks fit — which per-block chunks made routine. 2.24.0 counts characters
+and converts once, in the same expression `render_context` uses, so the gate cannot
+disagree with the renderer.
+
+**What 2.23.0's `next` said next.** Nine hard misses. Two were ranking —
+`truncateReason` at 16, `chatCompletionSchema` at 96. Seven were reported as
+*"line emitted, but the needle sits past its 200-character cut"* — a classification
+that did not exist before, because the branch that would have described it could never
+fire.
+
+**The cause.** `numbered_lines` kept `line[:200]`. The missed lines are
+single-paragraph markdown and long prompt strings, and the word asked about sat past
+column 300. The context therefore contained the line and not the answer, and every
+earlier diagnosis — "blocks missed the line", "not enough coverage of the file" — was
+describing the wrong phase. `clip_line` now shortens a long line *around the earliest
+query word*, so the word is always inside the emitted span. The cap rises to 240
+characters, because a 200-character window centred on a match leaves only ~65
+characters of context either side.
+
+**Also fixed.** `is_ignored` tested an anchored pattern as
+`str(rel).startswith("/build")`, which no relative path matches, so every `/pattern`
+in every `.gitignore` was a silent no-op. And the bench now prints a Wilson interval
+beside recall: at 100 queries one query is exactly 0.010, and this file has twice
+described a single query as a gain.
+
+**The loop is now a CI step.** Every push downloads the published 2.22.0 file, runs its
+`next` against the current checkout, then runs the current version's. "Each version
+builds the next" is checkable from the log instead of asserted in prose.
+
+**Prediction, recorded before measuring.** Hard code-only recall should rise above
+0.940 if the truncation theory is right — up to seven queries, so 0.990 with the two
+ranking misses intact. `over` should be 0 on every row. If recall does not move, the
+truncation theory is wrong and those seven misses are something else; if `over` is
+still non-zero, the character accounting has a second hole and the gate still is not
+the renderer.

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
 import re
 import sys
@@ -50,7 +51,7 @@ PROSE_EXT = {".md", ".rst", ".txt"}
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "2.23.0"
+__version__ = "2.24.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -175,16 +176,26 @@ def is_ignored(rel: Path, patterns: list[str]) -> bool:
         return False
     parts = rel.parts
     name = rel.name
+    text = str(rel)
     for pattern in patterns:
-        if "/" in pattern:
-            if str(rel).startswith(pattern):
+        anchored = pattern.startswith("/")
+        stripped = pattern.lstrip("/")
+        if not stripped:
+            continue
+        if anchored:
+            # `.gitignore` reads `/build` as "the root", but the old code tested
+            # `str(rel).startswith("/build")`, which no relative path ever matches.
+            # Every anchored pattern in every .gitignore was silently a no-op.
+            if text == stripped or text.startswith(stripped + "/"):
                 return True
             continue
-        if pattern in parts:
+        if "/" in stripped:
+            if text.startswith(stripped) or ("/" + stripped) in text:
+                return True
+            continue
+        if stripped in parts or stripped == name:
             return True
-        if pattern == name:
-            return True
-        if pattern.startswith("*.") and name.endswith(pattern[1:]):
+        if stripped.startswith("*.") and name.endswith(stripped[1:]):
             return True
     return False
 
@@ -312,9 +323,47 @@ def enclosing_block(text: str, hit: int) -> tuple[int, int]:
     return block_bounds(text.splitlines(), hit)
 
 
-def numbered_lines(lines: list[str], start: int, end: int) -> str:
+LINE_CAP = 240
+ELLIPSIS = "…"
+
+
+def clip_line(line: str, words: list[str] = ()) -> str:
+    """One line, shortened to LINE_CAP characters *around the query*, not at its head.
+
+    2.23.0's own `next` found this and nothing else could have. Nine hard misses,
+    seven of them reported as "line emitted, but the needle sits past its
+    200-character cut": the blocks were correct, and the line cap was discarding
+    the word. The lines in question are single-paragraph markdown and long prompt
+    strings, so the answer sat at column 300 of a line whose first 200 characters
+    are kept. Keeping the head of a long line is the wrong end to keep.
+    """
+    if len(line) <= LINE_CAP:
+        return line
+    lowered = line.lower()
+    at = -1
+    for word in words:
+        index = lowered.find(word)
+        if index >= 0 and (at < 0 or index < at):
+            at = index
+    if at < 0:
+        return line[: LINE_CAP - 1] + ELLIPSIS
+    start = max(0, at - LINE_CAP // 3)
+    end = min(len(line), start + LINE_CAP)
+    start = max(0, end - LINE_CAP)
+    piece = line[start:end]
+    if start:
+        piece = ELLIPSIS + piece
+    if end < len(line):
+        piece = piece + ELLIPSIS
+    return piece
+
+
+def numbered_lines(
+    lines: list[str], start: int, end: int, words: list[str] = ()
+) -> str:
     return "\n".join(
-        f"{start + i + 1}: {line[:200]}" for i, line in enumerate(lines[start:end])
+        f"{start + i + 1}: {clip_line(line, words)}"
+        for i, line in enumerate(lines[start:end])
     )
 
 
@@ -442,11 +491,6 @@ def candidate_ranges(source: Source, hit: int) -> list[tuple[int, int]]:
 
 
 PHASES = ("body", "excerpt", "map", "related", "call", "twohop")
-# The header is text the model reads, so it is paid for out of the budget like
-# everything else. Reserving a fixed cost for it keeps the *reported* total —
-# which now counts every label and the header — inside the budget exactly. The
-# old accounting summed block bodies only, so `used` understated what it emitted.
-HEADER_RESERVE = 24
 
 
 @dataclass
@@ -466,16 +510,14 @@ class Chunk:
     label: str
     text: str
 
-    @property
-    def cost(self) -> int:
-        return tokens(f"### {self.label}\n{self.text}")
 
-
-def make_chunk(source: Source, start: int, end: int, kind: str) -> Chunk:
+def make_chunk(
+    source: Source, start: int, end: int, kind: str, words: list[str] = ()
+) -> Chunk:
     label = f"{source.path}:{start + 1}-{end} ({kind})"
     return Chunk(
         source.path, start, end, kind, label,
-        numbered_lines(source.lines, start, end),
+        numbered_lines(source.lines, start, end, words),
     )
 
 
@@ -508,12 +550,19 @@ def plan_context(
     if not ranked or not active:
         return []
 
-    room = budget - HEADER_RESERVE
-    used = 0
+    budget_chars = budget * 4
+    chars = 0
     chunks: list[Chunk] = []
     ranges: set[tuple[str, int, int]] = set()
     mapped: set[str] = set()
     seen_text: set[str] = set()
+
+    def total_chars() -> int:
+        count = max(1, len(chunks))
+        return chars + 2 * (count - 1) + len(f"# context ({count} chunks)\n")
+
+    def spent() -> int:
+        return total_chars() // 4
 
     def contains_known(path: str, start: int, end: int) -> bool:
         """True when this range is nested in, or wraps, one already emitted.
@@ -529,32 +578,41 @@ def plan_context(
         return False
 
     def take(chunk: Chunk) -> bool:
-        nonlocal used
+        """Gate on the exact rendered size, never on a per-block estimate.
+
+        2.23.0 reserved a flat 24 tokens for the header and charged each block with
+        its own floored token count. Floors lose up to one token per block and the
+        "\\n\\n" separators between blocks were never counted at all, so a context of
+        ~30 small blocks overshot by ~30 tokens: the bench reported 15 of 100
+        queries over budget, and because `intelligence` then failed its own budget
+        check the "best within budget" line picked `read_all` — a 1.9M-token dump.
+        Counting characters and converting once, against the same expression
+        `render_context` uses, cannot drift.
+        """
+        nonlocal chars
         stripped = chunk.text.strip()
         if not stripped or stripped in seen_text:
             return False
-        if used + chunk.cost > room:
+        extra = len(f"### {chunk.label}\n") + len(chunk.text)
+        count = len(chunks) + 1
+        if chars + extra + 2 * (count - 1) + len(f"# context ({count} chunks)\n") > budget_chars:
             return False
         chunks.append(chunk)
         seen_text.add(stripped)
-        used += chunk.cost
+        chars += extra
         return True
 
     def too_big(source: Source, start: int, end: int) -> bool:
         """True only when the range provably cannot fit; a cheap pre-check.
 
-        Rendering a range to discover it does not fit is the expensive way to learn
-        what the line lengths already show. The floor is a true lower bound on the
-        rendered text: every line is at least one character plus a newline, and
-        `take` still measures the real cost before anything is kept. The gutter is
-        deliberately left out — its width varies with the line number, so counting
-        a minimum for it would only be a guess.
+        The floor ignores the label and the line-number gutter, so it is a genuine
+        lower bound: it can only skip a range that `take` would have refused anyway.
         """
         span = source.lines[start:end]
         if not span:
             return True
-        floor = sum(1 + min(len(line), 200) for line in span)
-        return used + floor // 4 + 1 > room
+        floor = sum(1 + min(len(line), LINE_CAP) for line in span)
+        return (chars + floor) // 4 > budget
 
     def emit(source: Source, hit: int, kind: str) -> bool:
         """The best range for this hit that the remaining budget can pay for."""
@@ -563,7 +621,7 @@ def plan_context(
                 continue
             if contains_known(source.path, start, end):
                 continue
-            if take(make_chunk(source, start, end, kind)):
+            if take(make_chunk(source, start, end, kind, words)):
                 ranges.add((source.path, start, end))
                 return True
         return False
@@ -592,7 +650,7 @@ def plan_context(
     if "excerpt" in active:
         reserve = int(budget * 0.15)
         for position, (_score, source) in enumerate(ranked[3:], start=4):
-            if used > room - reserve:
+            if spent() > budget - reserve:
                 break
             per_file = 3 if position <= 10 else 1
             for hit in best_hit_lines(source, words, per_file):
@@ -647,7 +705,7 @@ def plan_context(
 
     # Phase 6 — only if the budget is still mostly unspent, go one hop further.
     # Cheap-in, high-signal-out, and never at the expense of phases 1-5.
-    if "twohop" in active and used < int(budget * 0.6):
+    if "twohop" in active and spent() < int(budget * 0.6):
         for _score, source in ranked[:1]:
             for first in related(source, corpus.by_stem)[:3]:
                 middle = corpus.by_path.get(first)
@@ -663,12 +721,12 @@ def plan_context(
 
 
 def render_context(chunks: list[Chunk]) -> tuple[str, int]:
-    """Text and its true cost: the header and every label are inside the count.
+    """Text and its exact cost.
 
-    The header states how many chunks there are but not a token figure. A figure
-    embedded in the text would have to be known before the text that contains it
-    is measured, which is circular; stating the count and charging the header a
-    fixed reserve keeps the reported total exact.
+    This is the expression the budget gate in `plan_context` mirrors, character
+    for character: the header, every label, every line-number gutter and the
+    "\\n\\n" between blocks. If the two ever diverge, a policy reports a number it
+    did not emit, which is the defect 2.23.0 shipped.
     """
     body = "\n\n".join(f"### {chunk.label}\n{chunk.text}" for chunk in chunks)
     header = f"# context ({len(chunks)} chunks)\n"
@@ -697,34 +755,38 @@ def build_context_lean(
 ):
     """Token-first baseline: map within 40% of the budget, then short windows.
 
-    Charged on the same basis as `build_context` — labels and header included —
-    so the comparison between the two carries no caveat.
+    Charged in characters against the exact rendered size, the same way
+    `build_context` is. The previous version charged floored per-block token
+    counts against `budget - 24` and reported 6 of 100 hard queries over budget;
+    a baseline that overshoots is not a baseline.
     """
     ranked = rank(corpus.files, words, phrase)
-    head = max(1, int(budget * 0.4))
-    room = budget - HEADER_RESERVE
-    used = 0
-    mapped = 0
+    map_limit = max(1, int(budget * 0.4)) * 4
+    budget_chars = budget * 4
     chunks: list[tuple[str, str]] = []
+    chars = 0
+    mapped = 0
 
-    def push(label: str, text: str, ceiling: int) -> bool:
-        nonlocal used
-        cost = tokens(f"### {label}\n{text}")
-        if used + cost > min(ceiling, room):
+    def take(label: str, text: str, limit: int) -> bool:
+        nonlocal chars
+        extra = len(f"### {label}\n") + len(text)
+        count = len(chunks) + 1
+        total = chars + extra + 2 * (count - 1) + len(f"# context ({count} chunks)\n")
+        if total > limit:
             return False
         chunks.append((label, text))
-        used += cost
+        chars += extra
         return True
 
     for _score, source in ranked:
         block = "\n".join(outline(source))
         if not block:
             continue
-        cost = tokens(f"### {source.path}\n{block}")
-        if mapped + cost > head:
+        extra = len(f"### {source.path}\n") + len(block)
+        if mapped + extra > map_limit:
             continue
-        if push(source.path, block, head):
-            mapped += cost
+        if take(source.path, block, budget_chars):
+            mapped += extra
 
     for _score, source in ranked:
         hits = hit_lines(source, words)[:1]
@@ -732,7 +794,11 @@ def build_context_lean(
             continue
         start = max(0, hits[0] - 4)
         end = min(len(source.lines), hits[0] + 5)
-        push(f"{source.path} (excerpt)", numbered_lines(source.lines, start, end), room)
+        take(
+            f"{source.path} (excerpt)",
+            numbered_lines(source.lines, start, end, words),
+            budget_chars,
+        )
 
     body = "\n\n".join(f"### {label}\n{text}" for label, text in chunks)
     header = f"# context ({len(chunks)} chunks)\n"
@@ -744,6 +810,24 @@ def recall_of(context: str, needles: list[str]) -> float:
         return 0.0
     low = context.lower()
     return sum(1 for needle in needles if needle.lower() in low) / len(needles)
+
+
+def wilson(successes: float, total: int, z: float = 1.96) -> tuple[float, float]:
+    """The 95% interval for a proportion, so a one-query change is not called a gain.
+
+    At 100 queries each one is worth exactly 0.010 recall, and this project has
+    twice described a single query as a result. The interval says how much of a
+    difference the sample cannot distinguish; the lower bound is the number that
+    deserves to be quoted.
+    """
+    if total <= 0:
+        return 0.0, 0.0
+    p = successes / total
+    denominator = 1.0 + z * z / total
+    centre = (p + z * z / (2.0 * total)) / denominator
+    spread = z * math.sqrt(p * (1.0 - p) / total + z * z / (4.0 * total * total))
+    margin = spread / denominator
+    return max(0.0, centre - margin), min(1.0, centre + margin)
 
 
 def auto_queries(
@@ -997,10 +1081,11 @@ def cmd_bench(args) -> int:
     print(f"corpus: {args.path}  files: {len(files)}  queries: {len(queries)}  "
           f"budget: {args.budget}{scope}")
     print("objective: recall first, tokens second, speed third")
-    print("tokens is what the policy ACTUALLY emitted; over = it blew the budget\n")
+    print("tokens is what the policy ACTUALLY emitted; over = it blew the budget")
+    print("recall is a proportion of the queries, so its 95% interval follows it:")
+    print("a one-query difference sits inside that bracket and is not a result\n")
     print("| policy | recall | tokens | over | ms |")
     print("| --- | --- | --- | --- | --- |")
-
     rows = []
     for name, build in policies.items():
         total_recall = 0.0
@@ -1026,7 +1111,11 @@ def cmd_bench(args) -> int:
 
     for mean_recall, mean_tokens, over, mean_ms, name in rows:
         flag = f"{over}/{len(queries)}" if over else "-"
-        print(f"| {name} | {mean_recall:.3f} | {mean_tokens:.0f} | {flag} | {mean_ms:.1f} |")
+        low, high = wilson(mean_recall, len(queries))
+        print(
+            f"| {name} | {mean_recall:.3f} ({low:.3f}-{high:.3f}) | "
+            f"{mean_tokens:.0f} | {flag} | {mean_ms:.1f} |"
+        )
 
     print(f"\nbest within budget (recall, then tokens, then ms): {within[0][4]}")
 
@@ -1179,7 +1268,12 @@ def cmd_next(args) -> int:
                 and chunk.start <= line < chunk.end
             ]
             if covering:
-                why = "line emitted, but the needle sits past its 200-character cut"
+                # Reachable only when the block covering this line still does not
+                # contain the needle in its rendered text. The previous version
+                # also had a "line emitted but needle absent" branch, which cannot
+                # fire while the needle is on that line — an unreachable
+                # classification is worse than none, so it is gone.
+                why = "the block covering this line omits the needle after clipping"
             elif position == 0:
                 why = "file never ranked"
             elif position <= 10:
@@ -1232,6 +1326,13 @@ def cmd_selftest(_args) -> int:
 
     assert is_ignored(Path("build/x.py"), ["build"]), "ignore a directory"
     assert not is_ignored(Path("src/x.py"), ["build"]), "keep an unrelated path"
+    assert is_ignored(Path("build/x.py"), ["/build"]), "an anchored pattern matches at the root"
+    assert not is_ignored(Path("src/build/x.py"), ["/build"]), "an anchored pattern stays shallow"
+    checks += 4
+
+    far = "x" * 400 + " needle " + "y" * 400
+    assert "needle" in clip_line(far, ["needle"]), "a long line must keep the word asked about"
+    assert "needle" not in far[:LINE_CAP], "the head clip is exactly what used to lose it"
     checks += 2
 
     sample = Source("f.py", "x\nrefresh token here\nrefresh\n")
@@ -1360,6 +1461,21 @@ def cmd_selftest(_args) -> int:
         # The reported cost is the cost: labels and header are inside the count.
         assert used == tokens(body), f"reported {used} but emitted {tokens(body)}"
         checks += 1
+
+        # Many small blocks is the shape that exposed the overshoot: charging each
+        # block a floored token count lost a fraction per block and the separators
+        # were never counted, so 2.23.0 reported 15 of 100 queries over budget.
+        many = [
+            Source(f"tiny{i}.py", f"def handler():\n    refresh token\n    return {i}\n")
+            for i in range(40)
+        ]
+        tiny_text, tiny_used, tiny_n = build_context(
+            Corpus(many), ["refresh", "token"], 200
+        )
+        assert tiny_used <= 200, f"budget overshot: {tiny_used} > 200"
+        assert tiny_used == tokens(tiny_text), "reported cost must be the emitted cost"
+        assert tiny_n > 5, f"expected several chunks through the budget, got {tiny_n}"
+        checks += 3
 
         queries = auto_queries(files, 5)
         assert isinstance(queries, list), "auto_queries must return a list"
