@@ -106,16 +106,16 @@ def baseline(corpus: Path, tasks: list[dict], budget: int) -> None:
         print("\nbaseline: corpus empty, skipped", file=sys.stderr)
         return
     chunks = []
-    taken = 0
     for task in tasks:
         words = ctx.words_of(task["question"])
-        produced, used, _ = ctx.build_context(
+        produced, _used, _chunks = ctx.build_context(
             ctx.Corpus(files), words, budget, phrase=task["question"]
         )
         chunks.append(produced)
-        taken += used
-    produced = "\n".join(chunks)
-    report("baseline: ctx default, one query per task", produced, taken, len(chunks), tasks)
+    text = "\n".join(chunks)
+    # Measured the same way as a submission's text, so the two rows are
+    # comparable. ctx's own figure would be a second measuring stick.
+    report("baseline: ctx default, one query per task", text, tokens(text), len(chunks), tasks)
 
 
 def main() -> int:
