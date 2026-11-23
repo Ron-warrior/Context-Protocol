@@ -1123,3 +1123,41 @@ an anecdote with exact counts, not a benchmark of DeepSeek or of any model. What
 it does establish is that the failure modes Mode 4 names are real, they occur at
 roughly one per version in ordinary work, and that a check has to be mechanical to
 survive them.
+
+
+
+## Trace: 2.28.0 — putting the rule where it is actually loaded
+
+**The gap.** Mode 4's failure table went into `SKILL.md`, which a model reads only
+if someone pastes the repository URL. The root README is the file preloaded into
+every chat of this project — its own second paragraph says so — and it contained
+none of those rules. So the checks that would have caught the failures observed in
+this session were filed in the one place they would not be loaded.
+
+That is the same mistake as the wilson call site, one level up: the right content,
+attached to a caller nobody checks.
+
+**Promotion, per PROTOCOL.md.** A rule joins this file only if it fixes a failure
+that actually occurred, is checkable mid-task, and does not regress the bench.
+
+| Condition | This rule |
+| --- | --- |
+| Real failure | 0.960 quoted as "hard recall" when it was the code-only figure; "5+2+2" for a list that was 5+2+3 |
+| Checkable | Either the command and its output are on the page, or they are not |
+| Bench | The rule is about conduct, not retrieval; `retrieval_bench.py` cannot regress |
+
+**The rule, as promoted.**
+
+> **Every number carries its command.** Quote the command and its output, or say
+> you have not measured it. Recount from the printed list, never from memory:
+> misstating your own result is the commonest way to be wrong while feeling right.
+
+One rule covering both failures, because they are one failure: a figure asserted
+without the thing that produced it. Forty words, roughly fifty tokens in every
+chat forever, which is the real price of a preloaded rule and worth naming.
+
+**What is deliberately not promoted.** "Asserting a bug that was not there" and
+"shipping a check that never fired" stay in SKILL.md Mode 4. The first is already
+implied by *Never trust a symbol you have not seen defined*; the second is now
+enforced by code (`brackets` in the selftest and the bench), and a rule that a
+test enforces does not also need the README's budget.

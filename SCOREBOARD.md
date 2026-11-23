@@ -566,3 +566,28 @@ every printed row, where a violation exits 1 and refuses to summarise the table.
 
 **Not claimed.** N = 1, self-scored, on tasks this model wrote. Exact counts of an
 anecdote, not a benchmark.
+
+
+
+## 2.28.0 — the rule where it is loaded
+
+Mode 4's failure table was written into `SKILL.md`, which is read only when
+someone pastes the URL. The README is preloaded into every chat and had none of
+it — so the checks for the failures observed in this project were filed where they
+would not be loaded.
+
+Promoted one rule under the PROTOCOL.md test (real failure, checkable, no bench
+regression):
+
+> **Every number carries its command.** Quote the command and its output, or say
+> you have not measured it. Recount from the printed list, never from memory.
+
+It covers both the unmeasured claim (0.960 called hard recall) and the miscount
+(5+2+3 read as 6+2+2) because they are the same defect: a figure with nothing
+behind it. Cost: ~50 tokens in every chat, which is the honest price of a
+preloaded rule.
+
+Two failures stay out of the README on purpose — the false bug report is already
+covered by "never trust a symbol you have not seen defined", and the check that
+never fired is now enforced by `brackets()` in code, so it does not also need
+prose.

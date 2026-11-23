@@ -8,7 +8,7 @@ This is the root README on purpose. It is the only file loaded into every chat o
 this project, so it is the only place a rule can live and actually take effect.
 Everything else is loaded on demand — which is also rung 1.
 
-Version: 2.27.0 — the objective is ordered: intelligence, then tokens, then speed
+Version: 2.28.0 — the objective is ordered: intelligence, then tokens, then speed
 
 ---
 
@@ -108,6 +108,9 @@ Climb one rung at a time. Never start below the rung you can justify.
 - **Never change a signature without grepping its callers.** All of them.
 - **State what you did not verify.** "Could not run it" is a valid, required
   sentence — in this app nothing executes locally, so it is often the honest one.
+- **Every number carries its command.** Quote the command and its output, or say
+  you have not measured it. Recount from the printed list, never from memory:
+  misstating your own result is the commonest way to be wrong while feeling right.
 - **No generated output, ever.** Edit the source that produces it.
 
 ## Stop rules
