@@ -48,7 +48,7 @@ TEXT_EXT = {
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "2.20.0"
+__version__ = "2.21.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -924,6 +924,65 @@ def cmd_bench(args) -> int:
     return 0
 
 
+def cmd_next(args) -> int:
+    """What this version still misses, named precisely enough to fix.
+
+    `ctx bench` says how many answers were missed and that they sit at median
+    rank 1. It does not say which query, which file, or whether the needle's line
+    was emitted — and without those the next change is a guess again. This is the
+    same measurement resolved to lines, which is the only form a next version can
+    start from.
+    """
+    files = load(Path(args.path))
+    if not files:
+        print("no source files", file=sys.stderr)
+        return 1
+    queries = auto_queries(files, args.queries, args.seed, args.rare)
+    if not queries:
+        print("no queries generated", file=sys.stderr)
+        return 1
+
+    index = symbol_index(files)
+    misses: list[tuple[str, str, int, int, bool]] = []
+    for query in queries:
+        needle = query["needles"][0]
+        words = words_of(needle)
+        context = build_context(
+            files, words, args.budget, index=index, phrase=needle,
+        )[0]
+        if recall_of(context, query["needles"]) >= 1.0:
+            continue
+        holders = [source for source in files if needle in source.text]
+        if not holders:
+            continue
+        ranked_paths = [source.path for _score, source in rank(files, words, needle)]
+        for holder in holders:
+            lines = hit_lines(holder, [needle.lower()])
+            if not lines:
+                continue
+            line = lines[0]
+            position = ranked_paths.index(holder.path) + 1 if holder.path in ranked_paths else 0
+            needle_line = holder.lines[line].strip()
+            covered = bool(needle_line) and needle_line in context
+            misses.append((needle, holder.path, line, position, covered))
+
+    print(f"next: {len(misses)} misses on {args.path} "
+          f"({len(queries)} queries, rare<={args.rare}, budget {args.budget})")
+    for number, (needle, path, line, position, covered) in enumerate(misses, 1):
+        if covered:
+            why = "line emitted, needle still absent -- truncated or split"
+        elif position and position <= 10:
+            why = "ranked in the top 10; the chosen blocks missed the line"
+        elif position:
+            why = "ranked below the top 10; never reached"
+        else:
+            why = "file never ranked"
+        where = f"rank {position}" if position else "never ranked"
+        print(f"{number}. {needle}")
+        print(f"   {path}:{line + 1} ({where}) -- {why}")
+    return 0
+
+
 def cmd_selftest(_args) -> int:
     checks = 0
 
@@ -1099,6 +1158,20 @@ def main(argv: list[str] | None = None) -> int:
              "reaches the agent",
     )
     p_bench.set_defaults(func=cmd_bench)
+
+    p_next = sub.add_parser(
+        "next",
+        help="what the current version still misses, for the next version to fix",
+    )
+    p_next.add_argument("path")
+    p_next.add_argument("--queries", type=int, default=25)
+    p_next.add_argument("--budget", type=int, default=4000)
+    p_next.add_argument("--seed", type=int, default=0)
+    p_next.add_argument(
+        "--rare", type=int, default=1,
+        help="needles appear in at most this many files; 1 is the hard case",
+    )
+    p_next.set_defaults(func=cmd_next)
 
     p_self = sub.add_parser("selftest", help="run fixtures")
     p_self.set_defaults(func=cmd_selftest)

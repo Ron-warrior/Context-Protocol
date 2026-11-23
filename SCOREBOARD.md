@@ -318,3 +318,34 @@ Ranks 1–3 now get four, three and three enclosing blocks; ranks 4–10 get thr
 Prediction recorded before measuring: normal recall above 0.880, hard above 0.900,
 tokens rising to 3,200–3,600 and staying inside the budget.
 
+
+
+
+## 2.20.0 — measured
+
+0.890 normal, 0.900 hard, 2,938 and 2,776 tokens. One query gained over 2.18.0's
+0.880 for about 35 more tokens; hard is unchanged. The diagnose still reports 10
+misses at median rank 1, so covering more of the top file moved the smallest
+possible amount — one answer — and the rest of those misses are somewhere else.
+
+Kept: it is a gain, not a loss, and it spends idle budget rather than new budget.
+But it is a one-query result and should not be described as a fix.
+
+## 2.21.0 — `ctx next`, so a version builds the next one
+
+The loop this project exists to be was only half real. Versions were *measured*,
+and 2.19.0 was reverted on the measurement — that half works. But each new
+version's change was still chosen from my memory of a diagnosis rather than from
+the current version's own output, and 2.19.0 proves the cost of that: it was
+built on 2.14.0's "median rank 40" after that number had been obsolete for two
+versions.
+
+`ctx next` closes it: it runs the same generated queries as the bench, keeps only
+the misses, and prints each one as `needle`, `file:line`, the file's rank, and a
+classification — never ranked, ranked below the top 10 and never reached, ranked
+in the top 10 but the chosen blocks missed the line, or the line emitted and the
+needle still absent. The next change starts from those lines.
+
+No retrieval behaviour changed in this version, so recall must stay at 0.890 /
+0.900. That is itself the check: a tooling version that moves the numbers is a
+tooling version with a bug.

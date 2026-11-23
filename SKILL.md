@@ -62,6 +62,7 @@ ctx path User Store                  # files mentioning both, with line numbers
 ctx map .                            # file map with line counts
 ctx bench . --queries 25             # recall, then tokens, then ms
 ctx bench . --queries 100 --floor .75 # exit 1 rather than pass silently
+ctx next . --queries 100             # the misses, resolved to file:line
 ctx plan                             # the ladder as a checklist, no install needed
 ctx selftest                         # fixtures; exit 0 means it works
 ```

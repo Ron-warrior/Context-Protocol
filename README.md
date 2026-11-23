@@ -8,7 +8,7 @@ This is the root README on purpose. It is the only file loaded into every chat o
 this project, so it is the only place a rule can live and actually take effect.
 Everything else is loaded on demand — which is also rung 1.
 
-Version: 2.20.0 — the objective is ordered: intelligence, then tokens, then speed
+Version: 2.21.0 — the objective is ordered: intelligence, then tokens, then speed
 
 ---
 
@@ -35,6 +35,7 @@ ctx path User Store                  # files mentioning both, with line numbers
 ctx map .                            # file map with line sizes
 ctx bench . --queries 25             # recall, then tokens, then ms
 ctx bench . --queries 100 --floor .75 # exit 1 if recall drops below the floor
+ctx next . --queries 100             # the misses, resolved to file:line
 ctx plan                             # the ladder as a checklist
 ctx selftest                         # fixtures; exit 0 means it works
 ```
@@ -122,6 +123,9 @@ Climb one rung at a time. Never start below the rung you can justify.
 
 - **Fast, within a chat.** A rule that fails here is rewritten here and governs the
   next action in the same conversation. The failure is the evidence.
+- **Each version builds the next.** `ctx next` turns the current version's misses
+  into named files and lines, so the next change starts from what this one got
+  wrong rather than from memory of an older diagnosis.
 - **Slow, across chats.** This file is preloaded into every chat, so a promoted
   rule reaches work it was not derived from.
 - **Rules.** A version bumps only when a trace justifies it; a rule joins this file

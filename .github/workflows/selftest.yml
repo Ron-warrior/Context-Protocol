@@ -186,7 +186,10 @@ jobs:
           echo "--- where the misses come from ---"
           python3 ctx.py bench corpus --queries 100 --rare 1 --diagnose >> bench-corpus-hard.txt 2>&1
           diag=$?
-          tail -n 30 bench-corpus-hard.txt
+          echo "--- what the next version should fix ---"
+          python3 ctx.py next corpus --queries 100 --rare 1 >> bench-corpus-hard.txt 2>&1
+          next=$?
+          tail -n 60 bench-corpus-hard.txt
           {
             echo '### bench: freellmapi, normal'
             echo '```'
@@ -197,4 +200,4 @@ jobs:
             cat bench-corpus-hard.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          exit $((normal || hard || diag))
+          exit $((normal || hard || diag || next))

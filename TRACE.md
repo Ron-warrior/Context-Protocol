@@ -732,3 +732,49 @@ trade at all.
 tokens rising toward 3,200–3,600 but staying under the 4,000 budget. If recall
 does not move, then two blocks were not the reason for those misses either, and
 the next suspect is the *block boundary* rule rather than the block count.
+
+
+
+## Trace: 2.21.0 — each version builds the next, made mechanical
+
+**The question that exposed it.** "Are you following the thing where every new
+version you use it to help make the next version?" The honest answer was: no,
+not in the part that matters.
+
+What *was* working: every version was measured, and 2.19.0 was reverted when the
+measurement said zero (0.880 / 0.900, tokens within noise). The evidence half of
+the loop is real and it caught a bad version.
+
+What was not working: the next change was still chosen from my memory of a
+diagnosis. 2.19.0 is the proof — built on 2.14.0's "median rank 40" when 2.18.0
+had already moved the misses to median rank 1. Nothing in the tooling could have
+told me that, because `ctx bench --diagnose` reports counts and a median, not
+which queries, which files, or which lines.
+
+I also never invoked `ctx` on this repository while working on it. There is no
+shell in this environment, so `ctx` cannot execute locally at all; it runs only
+in CI. That is a real constraint, not an excuse: the fix has to be something CI
+runs and I read.
+
+**The change.** `ctx next` is the same measurement resolved to lines. For every
+generated query the current version misses, it prints the needle, the file and
+line holding it, that file's rank, and one of four classifications:
+
+| Classification | What it means for the next change |
+| --- | --- |
+| never ranked | a ranking problem — the file was not a candidate at all |
+| ranked below the top 10, never reached | a depth or budget problem |
+| ranked in the top 10, blocks missed the line | a block-selection problem |
+| line emitted, needle absent | the line was truncated or the fact is split |
+
+Those four need opposite fixes, and until this version the diagnose could not tell
+them apart at the file level, let alone the line.
+
+**Checked before claiming.** `cmd_next` was written with a call to a helper that
+does not exist (`context_of`), which would have raised `NameError` on first run.
+Reading the function back caught it, and it now builds the context once per query
+and reuses it. The read-back is the only reason that defect is not in the commit.
+
+**Prediction.** Recall unchanged at 0.890 / 0.900, because no retrieval code
+changed. If it moves, the new command is affecting the pipeline and that is a bug,
+not a gain.
