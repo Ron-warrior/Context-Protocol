@@ -111,7 +111,7 @@ A rule moves into README.md only if all three hold:
 
 1. It fixes a failure that actually occurred, described in one line.
 2. It is checkable — an agent can tell, mid-task, whether it is following it.
-3. It does not regress `eval/retrieval_bench.py` on a real repository.
+3. It does not regress `ctx bench` on a real repository.
 
 Otherwise it stays here, or in FINDINGS.md as an observation, or nowhere.
 

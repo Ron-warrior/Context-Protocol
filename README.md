@@ -148,5 +148,6 @@ Climb one rung at a time. Never start below the rung you can justify.
 | `TRACE.md` | Countable units and the measured trace behind each version | Bumping a version |
 | `SCOREBOARD.md` | Measured results per version, and the promotion rule | Changing this file |
 | `PROTOCOL.md` | Long form: per-situation playbook, budgets, memory schema | Unfamiliar task |
-| `eval/retrieval_bench.py` | Research harness: recall per 1k, stop rules, ablation, self-test | Changing the method |
+| `eval/tasks.json` | Ten questions over a fixture corpus, with hand-written answers | Measuring question answering |
+| `eval/score.py` | Scores the ranges a model actually read against those answers | Checking a model, or yourself |
 | `eval/compare_graphify.py` | Scores graphify's own query output on the same metric | Comparing against it |

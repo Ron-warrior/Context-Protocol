@@ -92,8 +92,10 @@ reads a file it has no reason to read, and `.gitignore` plus `.ctxrc` (`budget=`
 ## Mode 3 — measure before you trust
 
 ```bash
-python3 eval/retrieval_bench.py <repo> --auto 25 --sweep 1000,4000,16000
-python3 eval/retrieval_bench.py <repo> --auto 25 --ablate
+ctx bench . --queries 100            # recall, then tokens, then ms
+ctx bench . --sweep 1000,2000,4000   # recall per budget, and the knee
+ctx bench . --ablate                 # what each phase costs in recall and tokens
+ctx bench . --queries eval/tasks.json # your own questions, with known answers
 python3 eval/compare_graphify.py <repo> <graph.json>     # head-to-head
 ```
 

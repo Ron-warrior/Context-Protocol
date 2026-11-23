@@ -18,20 +18,26 @@ Not metrics: number of nodes, graph size, index build time, lines of rules.
 ## Running it
 
 ```bash
-python3 eval/retrieval_bench.py .                    # auto-generate queries from rare identifiers
-python3 eval/retrieval_bench.py . --budget 4000      # tighter budget
-python3 eval/retrieval_bench.py . --queries q.json   # your own questions
-python3 eval/retrieval_bench.py . --stop             # stopping rules, ranking held fixed
-python3 eval/retrieval_bench.py --selftest           # prove the harness, then trust it
+ctx bench .                          # recall, tokens and ms, four policies at once
+ctx bench . --budget 2000            # a tighter budget
+ctx bench . --sweep 1000,2000,4000   # recall per budget, and the knee
+ctx bench . --ablate                 # what each phase costs in recall and tokens
+ctx bench . --queries tasks.json     # your own questions, with known answers
+ctx selftest                         # fixtures; exit 0 means it works
 ```
 
 Policies compared, in one pass, at the same budget:
 
 1. `read_all` — every source file whole (what graphify's 71.5x is measured against)
-2. `grep_files` — whole files containing a keyword
-3. `pagerank_map` — signature outline ranked by personalized PageRank over the
-   import graph (the aider repo-map idea)
-4. `ladder` — this protocol: rank → outline under 40% of budget → scoped windows
+2. `grep` — whole files containing a keyword
+3. `lean` — the token-first baseline: map first, then short windows
+4. `intelligence` — this protocol: rank, bodies before maps, phases under a budget
+
+The PageRank-over-imports policy and the stop-rule experiments lived in
+`eval/retrieval_bench.py`, which was retired in 2.30.0: it carried a second
+retrieval engine whose numbers no user of the installed tool could reproduce. Its
+measurements are kept below, labelled historical, with the command that produced
+them.
 
 ## Version log
 

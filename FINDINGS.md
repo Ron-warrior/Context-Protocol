@@ -123,11 +123,14 @@ rule are free, and worth more than most of the software in this document.
 
 ## Measured since this document was written
 
-Every number above is someone else's self-report. The bench (`eval/retrieval_bench.py`)
-now measures the claims on a real repository (freellmapi, 795 files, 25
-rare-identifier auto queries, CI run 45074848996), and two verdicts gained nuance:
+Every number above is someone else's self-report. The bench measured the claims on
+a real repository (freellmapi, 795 files, 25 rare-identifier auto queries, CI run
+45074848996), and two verdicts gained nuance. That run used
+`eval/retrieval_bench.py`, retired in 2.30.0; the numbers below are historical and
+the policies that had no equivalent in `ctx` (PageRank over imports) are labelled
+as such.
 
-**The repo-map idea, measured.** `pagerank_map` is this project's implementation
+**The repo-map idea, measured.** `pagerank_map` was that harness's implementation
 of the aider claim — signature outlines ranked by personalized PageRank over the
 import graph, nothing else. Recall per 1k tokens:
 
@@ -219,7 +222,7 @@ of the ratio is a measurement of retrieval.
 
 ### What we measure instead
 
-`eval/retrieval_bench.py` scores **needle recall per 1k tokens**: does the returned
+`ctx bench` scores **needle recall per 1k tokens**: does the returned
 context contain the fact that decides the question, per token spent. That metric can
 *disagree* with compression — a policy can win on tokens and lose on recall — which
 is exactly what makes it useful.

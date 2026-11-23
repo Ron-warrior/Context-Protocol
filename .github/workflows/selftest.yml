@@ -220,21 +220,44 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit $((normal || hard || diag || next || codeonly))
-      - name: Measure the primitives (sweep, ablation, default-set misses)
+
+
+  primitives:
+    # A sweep is one full pass per budget and an ablation is one per phase, so at
+    # 100 queries this is a dozen passes: it belongs in its own bounded job rather
+    # than stretching the measurements above past their timeout.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check out the corpus
+        uses: actions/checkout@v4
+        with:
+          repository: tashfeenahmed/freellmapi
+          fetch-depth: 1
+          sparse-checkout: |
+            server/src
+            shared
+            cli
+          path: corpus
+      - name: Sweep, ablate, and name the default-set misses
         run: |
           set -uo pipefail
           # The sweep names the smallest budget that holds recall; the ablation
           # names phases that charge tokens for nothing; next on the default set
           # names the misses the hard sets do not have. All three are printed, so
           # the next version starts from numbers rather than from a guess.
-          python3 ctx.py bench corpus --queries 100 --sweep 1000,2000,3000,4000 > primitives.txt 2>&1
+          python3 ctx.py bench corpus --queries 50 --sweep 1000,2000,4000 > primitives.txt 2>&1
           sweep=$?
           cat primitives.txt
-          python3 ctx.py bench corpus --queries 100 --ablate >> primitives.txt 2>&1
+          python3 ctx.py bench corpus --queries 50 --ablate >> primitives.txt 2>&1
           ablate=$?
           python3 ctx.py next corpus --queries 100 >> primitives.txt 2>&1
           misses=$?
-          tail -n 60 primitives.txt
+          tail -n 80 primitives.txt
           {
             echo '### primitives: sweep, ablation, default-set misses'
             echo '```'
