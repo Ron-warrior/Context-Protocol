@@ -244,6 +244,13 @@ jobs:
           cat primitives.txt
           python3 ctx.py bench corpus --queries 50 --ablate >> primitives.txt 2>&1
           ablate=$?
+          # The knee is set from the strictest set: code-only draws from a different
+          # pool, so a budget that holds the identifier set can still lose a task
+          # there. Intelligence is the first priority, so the budget is the largest
+          # knee across the sets, not the smallest.
+          echo "--- the knee on the code-only set ---"
+          python3 ctx.py bench corpus --queries 50 --rare 1 --code-only --sweep 800,1000,1500,2000 >> primitives.txt 2>&1
+          csweep=$?
           python3 ctx.py next corpus --queries 100 >> primitives.txt 2>&1
           misses=$?
           # The same ablation on hand-written questions. Identifier lookups are
@@ -263,4 +270,4 @@ jobs:
             cat primitives.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          exit $((sweep || ablate || misses || qsweep || qablate))
+          exit $((sweep || ablate || csweep || misses || qsweep || qablate))
