@@ -784,10 +784,16 @@ not a gain.
 ## Trace: 2.22.0 — the first thing `ctx next` said was that the bench was wrong
 
 **What the loop produced on its first run.** `ctx next` ran 2.21.0 on the same
-100 hard queries and named all 10 misses with file, line, rank and cause. Six
-were Uzbek and Turkish words appearing once in `README.uz.md` and `README.tr.md`.
-Two more were in one prose instructions file, both at line 12. Two were code:
-`truncateReason` at rank 16 and `chatCompletionSchema` at rank 96.
+100 hard queries and named all 10 misses with file, line, rank and cause. Five
+were Uzbek and Turkish words appearing once in `README.uz.md` and `README.tr.md`;
+two more were English words inside a prose prompt file, both at line 12; three
+were code: `truncateReason` at rank 16, `chatCompletionSchema` at rank 96, and
+`tombstone_source` at rank 7.
+
+I first wrote that split down as "six, two, two" — from memory of the list rather
+than from the list, minutes after the tool printed it. Recounting gives 5 + 2 + 3.
+The correction stays in this entry because miscounting your own output is exactly
+the failure the tool exists to prevent.
 
 **What that means.** `auto_queries` selects needles from identifiers found in any
 text file, and `.md` is a text file. So a prose word that happens to occur once

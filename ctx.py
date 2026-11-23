@@ -605,7 +605,7 @@ def auto_queries(
 
     `code_only` skips prose when *choosing* the identifier, not when searching.
     A word that appears once in a translated README qualifies as a rare
-    identifier and is not a fact anyone would query a codebase for; 6 of the 10
+    identifier and is not a fact anyone would query a codebase for; 5 of the 10
     remaining misses were exactly that. The corpus still contains those files, so
     a real question about them is still answerable — only the generated questions
     get narrower. Reported alongside the default rate rather than replacing it,

@@ -370,8 +370,14 @@ all 10 remaining misses:
 | `recapping` | `codex-base-instructions.ts:12` | 1 | blocks missed the line |
 | `kuyruklu` | `README.tr.md:157` | 1 | blocks missed the line |
 
-Six are Uzbek and Turkish words from translated READMEs. Two more are in one
-prose instructions file, at the same line. **Two are code.**
+Recounting them exactly: **five** are Uzbek and Turkish words from translated
+READMEs, **two** are English words inside a prose prompt file
+(`codex-base-instructions.ts:12`), and **three** are real code identifiers —
+`truncateReason`, `chatCompletionSchema`, `tombstone_source`.
+
+(The first version of this table said "six from READMEs, two more, two code".
+That was a miscount — 5 + 2 + 3 — written from memory of the list instead of from
+the list. Corrected here rather than silently.)
 
 `auto_queries` builds needles from identifiers in *every* text file, and `.md` is
 in the corpus. A word that appears once in a translated README therefore qualifies
