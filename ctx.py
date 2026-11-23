@@ -51,7 +51,7 @@ PROSE_EXT = {".md", ".rst", ".txt"}
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "2.24.0"
+__version__ = "2.25.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -372,8 +372,10 @@ def rank(
 ) -> list[tuple[float, Source]]:
     """Score by evidence the answer is here, not by how cheap the file is.
 
+    - lookup: the query is one identifier and the file contains it verbatim (a tier,
+      above everything else)
     - exact phrase: the whole query string appears verbatim (strongest signal)
-    - symbol match: a query word is part of a declared name
+    - symbol match: a query word is part of an identifier somewhere in the file
     - co-occurrence: two distinct query words on one line (the relation asked about)
     - raw hits: how often the words appear at all
     Length damping stays as a weak prior: a huge file mentioning a word once is
@@ -387,7 +389,19 @@ def rank(
         return []
     phrase_low = (phrase or "").strip().lower()
     use_phrase = len(phrase_low) > 3
-    scored: list[tuple[float, Source]] = []
+    # A query that is a single identifier is a lookup, not a topic. Any file that
+    # contains that exact identifier outranks every file that merely contains its
+    # parts, whatever the part counts say. 2.24.0 ranked three needles that live in
+    # exactly one file at 13, 37 and 130 for this reason: `maxMb` and
+    # `ensureApiKeysBaseUrlColumn` split into common words, and a file mentioning
+    # `max` forty times outscored the one file holding the answer. A x3 multiplier
+    # cannot beat a hundred partial hits; a tier can.
+    lookup = (
+        bool(phrase_low)
+        and len(phrase_low) > 3
+        and not any(character.isspace() for character in phrase_low)
+    )
+    scored: list[tuple[float, bool, Source]] = []
     for source in files:
         if not any(word in source.low for word in words):
             continue
@@ -401,11 +415,13 @@ def rank(
                     co_occur += 1
         symbol_hits = sum(1 for word in words if word in source.symbols)
         score = (hits + 4 * symbol_hits + 3 * co_occur) / (1.0 + len(source.text) / 4000.0)
-        if use_phrase and phrase_low in source.low:
+        has_phrase = use_phrase and phrase_low in source.low
+        if has_phrase and not lookup:
+            # A sentence that happens to appear verbatim is strong but not decisive.
             score *= 3.0
-        scored.append((score, source))
-    scored.sort(key=lambda item: (-item[0], item[1].path))
-    return scored
+        scored.append((score, has_phrase, source))
+    scored.sort(key=lambda item: (not item[1], -item[0], item[2].path))
+    return [(score, source) for score, _has_phrase, source in scored]
 
 
 def declared_symbols(source: Source, limit: int = 6) -> list[str]:
@@ -1378,6 +1394,17 @@ def cmd_selftest(_args) -> int:
 
         ranked = rank(files, ["refresh", "token"])
         assert ranked and ranked[0][1].path == "alpha.py", "definition-bearing file must rank first"
+        checks += 1
+
+        # A lookup, not a topic: the file holding the identifier verbatim beats a
+        # file that only repeats its parts. Forty mentions of `max` score ~40; the
+        # single `maxMb` declaration scores ~15. Without the tier the noisy file
+        # wins, which is how 2.24.0 left three needles at ranks 13, 37 and 130.
+        noisy = Source("noise.py", "max = 1\n" * 40)
+        holder = Source("answer.py", "def maxMb(limit):\n    return min(limit, maxMb)\n")
+        lookup_ranked = rank([noisy, holder], words_of("maxMb"), "maxMb")
+        assert lookup_ranked[0][1].path == "answer.py", \
+            "an identifier lookup must outrank a file that only repeats its parts"
         checks += 1
 
         alpha = next(f for f in files if f.path == "alpha.py")

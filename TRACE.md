@@ -952,3 +952,55 @@ ranking misses intact. `over` should be 0 on every row. If recall does not move,
 truncation theory is wrong and those seven misses are something else; if `over` is
 still non-zero, the character accounting has a second hole and the gate still is not
 the renderer.
+
+
+
+## Trace: 2.25.0 — a lookup is not a topic
+
+**What 2.24.0 measured.** Normal 0.930 at 3,212 tokens, hard 0.980 at 2,945,
+hard code-only 0.960 at 3,698. No row over budget. The `next` list, code-only:
+
+| needle | rank | classification |
+| --- | --- | --- |
+| `heuristicallyExhausted` | 10 | ranked in the top 10; blocks missed the line |
+| `maxMb` | 13 | never reached |
+| `firstNumber` | 37 | never reached |
+| `ensureApiKeysBaseUrlColumn` | 130 | never reached |
+
+**Why three of four were never reached.** Two causes stacked. Phase 1 spends four,
+three and three enclosing blocks on the top three files, and phase 2 stops at 85%
+of the budget, so by the time rank 13 comes round the money is gone. That is the
+emission half.
+
+But the ranking half is worse. `maxMb` splits into `max` and `mb`; a file that
+mentions `max` forty times scores about 40, while the single file declaring
+`maxMb` scores about 15. The exact-phrase multiplier was ×3, which cannot beat a
+hundred partial hits. `firstNumber` and `ensureApiKeysBaseUrlColumn` fail the same
+way. So the answer's own file was pushed so far down the list that no budget could
+have reached it.
+
+**The change.** A query that is a single identifier is a *lookup*, not a topic.
+Any file containing that exact identifier now outranks every file that merely
+contains its parts, regardless of part counts. Sentence queries keep the ×3
+multiplier, because for prose a verbatim hit is strong but not conclusive.
+
+**Why this is not tuning to the benchmark.** `ctx next` generates identifier
+queries because that is what it can score mechanically. But "I asked for this
+symbol, so the file that has this symbol should come first" is the most basic
+correctness property a code retrieval tool can have, not an artifact of how the
+test is built. Natural-language queries are unaffected by the change and the
+0.930 normal figure covers those.
+
+**A correction, before the measurement.** In the previous turn I reported a unit
+mismatch in `too_big`, comparing characters against tokens. Re-reading it:
+`budget_chars = budget * 4` and the check is `(chars + floor) // 4 > budget`, so
+the units are consistent and the floor is a genuine lower bound. There was no bug
+and I did not change it. I also reported 2.24.0's hard recall as 0.960; that is
+the code-only figure, and the default hard number is 0.980.
+
+**Prediction, recorded before measuring.** Code-only hard recall rises from 0.960
+toward 0.99 and the three "never reached" needles move to the top of the ranking.
+Default and normal recall also rise, since the same identifiers appear in their
+needle sets. Tokens change little. If recall does not move, the rank positions
+were not caused by partial-word outscoring and the next suspect is phase
+allocation — breadth-first emission instead of four blocks for one file.

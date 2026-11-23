@@ -469,3 +469,35 @@ Two fixes from 2.23.0's own instrument, and one methodological change:
 Not changed, on purpose: `rank`. Four of the six remaining code-only misses are still
 ranking failures at ranks 10–130, and that change has to be measured on its own.
 
+
+
+
+## 2.24.0 — measured
+
+| set | recall | tokens | over |
+| --- | --- | --- | --- |
+| normal | 0.930 | 3,212 | – |
+| hard | 0.980 | 2,945 | – |
+| hard, code-only | 0.960 | 3,698 | – |
+
+No row over budget, which was 2.23.0's regression. The truncation theory held:
+clipping around the earliest query word instead of at the head of the line
+recovered the answers that sat past column 200.
+
+**Corrected here:** the previous entry described 0.960 as the hard figure. It is
+the code-only one; default hard is 0.980.
+
+## 2.25.0 — a lookup is not a topic
+
+`next` at 2.24.0 left four code-only misses, three of them "never reached" at
+ranks 13, 37 and 130. Ranking, not emission, put them there: an identifier query
+splits into common words, and a file repeating one of those words beats the file
+that contains the identifier.
+
+A single-identifier query is now a lookup: files containing that exact identifier
+outrank files containing only its parts, whatever the part counts say. Sentence
+queries keep the ×3 verbatim multiplier.
+
+Prediction recorded before measuring: code-only hard recall from 0.960 toward
+0.99, the three needles at the top of the ranking, other rates up, tokens roughly
+flat.
