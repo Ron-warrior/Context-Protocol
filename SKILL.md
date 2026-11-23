@@ -55,9 +55,9 @@ Climb one rung at a time. Do not skip to a lower rung you cannot justify.
    if the project runs, run it.
 7. **Persist.** Write what you learned into the repo, not just the chat.
 
-Stop: ~4k tokens of retrieval per question. Two misses means the strategy is
-wrong — search for the *definition*, not the *usage* — not that you need a fourth
-file.
+Stop: ~1k tokens of retrieval per question — the measured knee. Two misses means
+the strategy is wrong — search for the *definition*, not the *usage* — not that
+you need a fourth file.
 
 ## Mode 2 — the CLI
 

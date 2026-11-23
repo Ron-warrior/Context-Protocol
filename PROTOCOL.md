@@ -21,8 +21,10 @@ and the anti-patterns.
 - Rough cost of a token: 4 characters. A 900-line source file is ~9k tokens.
 - A 40-line window is ~400 tokens. You can afford ~10 windows for the price of one
   file, and they will usually beat it, because they are *chosen*.
-- Soft ceiling per question: **4,000 tokens of retrieval**. A third of a context
-  window buys you the answer to most questions if the ranking is honest.
+- Soft ceiling per question: **1,000 tokens of retrieval**. That is the measured
+  knee on two corpora (`ctx bench --sweep`): recall is flat from 1,000 to 4,000,
+  so the extra tokens buy nothing. A quarter of a context window answers most
+  questions if the ranking is honest.
 - Outlines are the cheapest useful unit: one line per declaration, ~10–15 tokens,
   and they tell you which file is worth a window.
 

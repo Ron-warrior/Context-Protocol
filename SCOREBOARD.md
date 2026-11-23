@@ -662,5 +662,34 @@ a PageRank-over-imports policy the product never had) and the CI job that ran it
 `compare_graphify.py` now imports `ctx`; the sweep, ablation and question-file
 modes live in `ctx bench`. One implementation.
 
-**Default budget: unchanged at 4,000 in this commit**, pending the question-set
-sweep. The number to beat is 1,000.
+**Default budget: 4,000 → 1,000 in 3.0.0**, after the question-set sweep agreed
+with the identifier sweep. Both corpora hold recall at 1,000; the question set
+even holds it at 500 on its six-file fixture.
+
+
+
+## 3.0.0 — the default budget follows the evidence
+
+Two sweeps, same shape, both before this version:
+
+| set | recall @ 500 | @ 1,000 | @ 2,000 | @ 4,000 |
+| --- | --- | --- | --- | --- |
+| identifier, 795 files | — | 0.940 | 0.940 | 0.940 |
+| questions, 6-file fixture | 1.000 | 1.000 | 1.000 | 1.000 |
+
+Recall is flat across a 4x budget range on both. The identifier set spends 922
+tokens to hold 47 of 50 hits; spending 3,281 holds exactly the same 47. The
+default budget is therefore **1,000**, the larger of the two knees, and
+`PROTOCOL.md`, `SKILL.md`, `ctx plan` and the README cap all move with it.
+
+**Phases were not deleted.** The ablation says only `body` earns recall
+(−0.640 identifier, −0.700 questions when removed) and the other five are
+neutral. But their token deltas are not additive: removing one frees budget that
+another consumes, so "drop phases to save tokens" is not what the numbers show.
+At a 1,000-token budget the phases are bounded by the budget anyway, and the
+lookup benchmark still cannot see what the call and import phases are for.
+
+**What 3.0.0 is.** One retrieval engine, one measurement path, a question set
+beside the identifier set, a default budget that came from measurement rather
+than habit, and a README inside the line budget its own protocol has required
+since 1.0.0.

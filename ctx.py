@@ -51,7 +51,7 @@ PROSE_EXT = {".md", ".rst", ".txt"}
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "2.30.0"
+__version__ = "3.0.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -966,7 +966,7 @@ def cmd_query(args) -> int:
             print(f"{score:8.2f}  {source.path}", file=sys.stderr)
     started = time.perf_counter()
     rc = load_rc(Path(args.path))
-    budget = args.budget if args.budget is not None else int(rc.get("budget", "4000"))
+    budget = args.budget if args.budget is not None else int(rc.get("budget", "1000"))
     expand = args.expand
     if rc.get("expand", "").lower() in {"off", "false", "0", "no"}:
         expand = False
@@ -1053,7 +1053,7 @@ def cmd_plan(_args) -> int:
     print("Context Protocol -- objective: intelligence, then tokens, then speed.\n")
     for rung in LADDER:
         print(f"  [ ] {rung}")
-    print("\nStop: ~4k tokens per question. Two misses means change rung, not read a third file.")
+    print("\nStop: ~1k tokens per question. Two misses means change rung, not read a third file.")
     return 0
 
 
@@ -1767,7 +1767,7 @@ def main(argv: list[str] | None = None) -> int:
     # Both query forms share the budget flag; default None so .ctxrc can win.
     for parser_ in (p_query, p_ask):
         parser_.add_argument(
-            "--budget", type=int, default=None, help="default: .ctxrc, else 4000"
+            "--budget", type=int, default=None, help="default: .ctxrc, else 1000"
         )
         parser_.add_argument(
             "--rank-only", dest="rank_only", action="store_true",
@@ -1785,7 +1785,7 @@ def main(argv: list[str] | None = None) -> int:
         "--queries", default="25",
         help="a count to generate, or a JSON file of questions with known answers",
     )
-    p_bench.add_argument("--budget", type=int, default=4000)
+    p_bench.add_argument("--budget", type=int, default=1000)
     p_bench.add_argument("--seed", type=int, default=0)
     p_bench.add_argument(
         "--sweep", default=None,
@@ -1829,7 +1829,7 @@ def main(argv: list[str] | None = None) -> int:
         "--queries", default="25",
         help="a count to generate, or a JSON file of questions with known answers",
     )
-    p_next.add_argument("--budget", type=int, default=4000)
+    p_next.add_argument("--budget", type=int, default=1000)
     p_next.add_argument("--seed", type=int, default=0)
     p_next.add_argument(
         "--rare", type=int, default=1,
