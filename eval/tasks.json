@@ -1,55 +1,46 @@
 {
   "corpus": "eval/fixtures/ladder",
+  "note": "Answers are exact substrings of the fixture corpus. No answer_path: the location is the thing being measured, so shipping it would let a model submit the right files without searching.",
   "tasks": [
     {
       "question": "What is the default maximum request body size in megabytes?",
-      "answer": "MAX_BODY_MB = 8",
-      "answer_path": "config/defaults.py"
+      "answer": "MAX_BODY_MB = 8"
     },
     {
       "question": "How many attempts does the retry helper make before giving up?",
-      "answer": "MAX_ATTEMPTS = 5",
-      "answer_path": "service/retry.py"
+      "answer": "MAX_ATTEMPTS = 5"
     },
     {
       "question": "Which HTTP header carries the session token?",
-      "answer": "X-Session-Token",
-      "answer_path": "service/auth.py"
+      "answer": "X-Session-Token"
     },
     {
       "question": "Which function extends a live session by another TTL?",
-      "answer": "def refresh_session",
-      "answer_path": "service/auth.py"
+      "answer": "def refresh_session"
     },
     {
       "question": "What status code does the router return for an unknown route?",
-      "answer": "NOT_FOUND_CODE = 404",
-      "answer_path": "config/defaults.py"
+      "answer": "NOT_FOUND_CODE = 404"
     },
     {
       "question": "What is the base delay of the retry backoff, in seconds?",
-      "answer": "BACKOFF_BASE_S = 0.4",
-      "answer_path": "service/retry.py"
+      "answer": "BACKOFF_BASE_S = 0.4"
     },
     {
       "question": "In which file are session records persisted?",
-      "answer": "sessions.db",
-      "answer_path": "service/storage.py"
+      "answer": "sessions.db"
     },
     {
       "question": "What exception is raised when the store cannot be parsed?",
-      "answer": "StorageCorrupt",
-      "answer_path": "service/storage.py"
+      "answer": "StorageCorrupt"
     },
     {
       "question": "Which class implements the per-user token bucket?",
-      "answer": "class RateLimiter",
-      "answer_path": "service/storage.py"
+      "answer": "class RateLimiter"
     },
     {
       "question": "What should be done with the writer when the volume is full?",
-      "answer": "freeze the writer",
-      "answer_path": "docs/runbook.md"
+      "answer": "freeze the writer"
     }
   ]
 }
