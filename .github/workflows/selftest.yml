@@ -220,3 +220,25 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit $((normal || hard || diag || next || codeonly))
+      - name: Measure the primitives (sweep, ablation, default-set misses)
+        run: |
+          set -uo pipefail
+          # The sweep names the smallest budget that holds recall; the ablation
+          # names phases that charge tokens for nothing; next on the default set
+          # names the misses the hard sets do not have. All three are printed, so
+          # the next version starts from numbers rather than from a guess.
+          python3 ctx.py bench corpus --queries 100 --sweep 1000,2000,3000,4000 > primitives.txt 2>&1
+          sweep=$?
+          cat primitives.txt
+          python3 ctx.py bench corpus --queries 100 --ablate >> primitives.txt 2>&1
+          ablate=$?
+          python3 ctx.py next corpus --queries 100 >> primitives.txt 2>&1
+          misses=$?
+          tail -n 60 primitives.txt
+          {
+            echo '### primitives: sweep, ablation, default-set misses'
+            echo '```'
+            cat primitives.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $((sweep || ablate || misses))

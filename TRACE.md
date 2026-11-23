@@ -1161,3 +1161,43 @@ chat forever, which is the real price of a preloaded rule and worth naming.
 implied by *Never trust a symbol you have not seen defined*; the second is now
 enforced by code (`brackets` in the selftest and the bench), and a rule that a
 test enforces does not also need the README's budget.
+
+
+
+## Trace: 2.29.0 — the measurements that were still blind
+
+Three things could not be answered from the product's own output before this
+version. Each is now a flag on `ctx bench`, and the measurement runs in CI.
+
+**The knee.** `--sweep 1000,2000,3000,4000` runs the bench at each budget and
+names the smallest one whose hit count equals the largest budget's. Same hit
+count rather than "inside the interval", because a one-query difference is
+precisely what the interval says is not a result, and 2.26.0 spent a version
+learning that a statistic nobody compares is decoration.
+
+**Phase cost.** `--ablate` removes each phase in turn and reports the recall and
+token delta. A phase whose removal costs nothing has been charging the budget for
+itself. This uses the `--phases` flag that has existed since 2.23.0 and was never
+measured at the product level.
+
+**The misses the hard sets do not have.** `ctx next` had only ever run with
+`--rare 1`, so the mixed set's 6 misses were invisible while hard and code-only
+both reported zero. CI now runs `next` on the default set too.
+
+**Question-shaped measurement.** `--queries` accepts a file as well as a count,
+in both the `{question, needles}` shape and the `{tasks: [{question, answer}]}`
+shape the fixture uses. Every generated query is a symbol lookup; the tool exists
+to answer questions, and until now the product had no way to measure that
+directly.
+
+**A refactor, for the reason the refactor exists.** The measurement loop moved
+out of `cmd_bench` into `bench_rows(corpus, queries, budget, phases)`, so the
+sweep and the ablation call the same code the single-budget table calls. Three
+measurements, one implementation. That is the same argument that retires the
+research harness in 2.30.0.
+
+**Prediction, recorded before measuring.** The sweep's knee is below 4,000 on the
+mixed set, since the normal bench spends 3,212. At least one phase shows a delta
+inside the interval — which is to say, no measurable contribution — and should be
+dropped in 2.30.0. The default-set `next` reports misses of a different shape
+from the hard set's, most likely truncated lines rather than unranked files.

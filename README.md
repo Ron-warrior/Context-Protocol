@@ -8,7 +8,7 @@ This is the root README on purpose. It is the only file loaded into every chat o
 this project, so it is the only place a rule can live and actually take effect.
 Everything else is loaded on demand — which is also rung 1.
 
-Version: 2.28.0 — the objective is ordered: intelligence, then tokens, then speed
+Version: 2.29.0 — the objective is ordered: intelligence, then tokens, then speed
 
 ---
 
@@ -36,6 +36,9 @@ ctx map .                            # file map with line sizes
 ctx bench . --queries 25             # recall, then tokens, then ms
 ctx bench . --queries 100 --floor .75 # exit 1 if recall drops below the floor
 ctx next . --queries 100             # the misses, resolved to file:line
+ctx bench . --sweep 1000,2000,4000   # recall per budget, and the knee
+ctx bench . --ablate                 # what each phase costs in recall and tokens
+ctx bench . --queries eval/tasks.json # question-shaped, not only symbol lookups
 ctx plan                             # the ladder as a checklist
 ctx selftest                         # fixtures; exit 0 means it works
 python3 eval/score.py --submission mine.json --baseline  # score what you read

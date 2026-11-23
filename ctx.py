@@ -51,7 +51,7 @@ PROSE_EXT = {".md", ".rst", ".txt"}
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "2.28.0"
+__version__ = "2.29.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -1057,19 +1057,58 @@ def cmd_plan(_args) -> int:
     return 0
 
 
-def cmd_bench(args) -> int:
-    corpus = Corpus(load(Path(args.path)))
-    files = corpus.files
-    if not files:
-        print("no source files", file=sys.stderr)
-        return 1
-    queries = auto_queries(
-        files, args.queries, args.seed, args.rare, code_only=args.code_only
-    )
-    if not queries:
-        print("no queries generated", file=sys.stderr)
-        return 1
+def queries_from_file(path: Path) -> list[dict]:
+    """Queries from JSON, in either of two shapes.
 
+    The harness shape is a list of {question, needles}. The task shape is
+    {tasks: [{question, answer}]}, where the answer string is the needle. A file
+    of questions with known answers is the only way to measure the thing this
+    tool exists for — answering a question — instead of only looking up a symbol.
+    """
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    items = raw.get("tasks", raw) if isinstance(raw, dict) else raw
+    out: list[dict] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        needles = item.get("needles")
+        if not needles and item.get("answer"):
+            needles = [str(item["answer"])]
+        if not needles:
+            continue
+        out.append({
+            "question": str(item.get("question", needles[0])),
+            "needles": [str(n) for n in needles],
+        })
+    return out
+
+
+def queries_for(args, files: list[Source]) -> list[dict]:
+    """`--queries 100` generates; `--queries tasks.json` reads the file."""
+    raw = str(getattr(args, "queries", "25"))
+    if raw.isdigit():
+        return auto_queries(
+            files,
+            int(raw),
+            args.seed,
+            getattr(args, "rare", 2),
+            code_only=getattr(args, "code_only", False),
+        )
+    return queries_from_file(Path(raw))
+
+
+def bench_rows(
+    corpus: Corpus,
+    queries: list[dict],
+    budget: int,
+    phases: set[str] | None = None,
+) -> list[tuple[float, int, int, float, str]]:
+    """One pass at one budget: every policy over every query.
+
+    Extracted from cmd_bench so a sweep and an ablation can call it with other
+    budgets and other phase sets. One implementation, many measurements.
+    """
+    files = corpus.files
     # The whole corpus is the same string for every question, so it is built once.
     # 100 queries were each rebuilding two million tokens of text for a number that
     # cannot change between them.
@@ -1089,13 +1128,11 @@ def cmd_bench(args) -> int:
         return body, tokens(body)
 
     def lean(words, phrase):
-        return build_context_lean(corpus, words, args.budget, phrase)[:2]
-
-    phases = phases_of(getattr(args, "phases", None))
+        return build_context_lean(corpus, words, budget, phrase)[:2]
 
     def intelligence(words, phrase):
         return build_context(
-            corpus, words, args.budget, phrase=phrase, phases=phases
+            corpus, words, budget, phrase=phrase, phases=phases
         )[:2]
 
     policies = {
@@ -1104,6 +1141,115 @@ def cmd_bench(args) -> int:
         "lean": lean,
         "intelligence": intelligence,
     }
+
+    rows: list[tuple[float, int, int, float, str]] = []
+    for name, build in policies.items():
+        total_recall = 0.0
+        total_tokens = 0
+        over = 0
+        started = time.perf_counter()
+        for query in queries:
+            needles = query["needles"]
+            context, used = build(words_of(needles[0]), needles[0])
+            total_tokens += used
+            if used > budget:
+                over += 1
+            total_recall += recall_of(context, query["needles"])
+        elapsed = (time.perf_counter() - started) * 1000
+        count = len(queries)
+        rows.append((total_recall / count, total_tokens / count, over, elapsed / count, name))
+    return rows
+
+
+def knee_budget(hits: dict[int, int], budgets: list[int]) -> int:
+    """The smallest budget whose hit count equals the best hit count found.
+
+    Same hit count rather than "within the interval", because a one-query
+    difference is exactly what the interval says is not a result. The largest
+    budget is the reference, so a sweep that never loses a hit returns its own
+    smallest member.
+    """
+    best = hits[max(budgets)]
+    return min(b for b in budgets if hits[b] == best)
+
+
+def report_sweep(
+    corpus: Corpus,
+    queries: list[dict],
+    args,
+    phases: set[str] | None,
+) -> int:
+    """The smallest budget that holds recall, measured rather than guessed.
+
+    The knee is the smallest budget with the same hit count as the largest one.
+    Same hit count, not "inside the interval", because a one-query difference is
+    exactly what the interval says is not a result.
+    """
+    budgets: list[int] = []
+    for part in str(args.sweep).split(","):
+        part = part.strip()
+        if not part.isdigit():
+            print(f"--sweep expects comma-separated integers, got {part!r}", file=sys.stderr)
+            return 2
+        budgets.append(int(part))
+    budgets = sorted(set(budgets))
+    if not budgets:
+        print("--sweep needs at least one budget", file=sys.stderr)
+        return 2
+
+    count = len(queries)
+    print(f"sweep: {args.path}  files: {len(corpus.files)}  queries: {count}")
+    print("a smaller budget wins only if it keeps the same hit count")
+    print("\n| budget | recall | tokens | over | lean recall |")
+    print("| --- | --- | --- | --- | --- |")
+
+    hits: dict[int, int] = {}
+    for budget in budgets:
+        by_name = {row[4]: row for row in bench_rows(corpus, queries, budget, phases)}
+        intel = by_name["intelligence"]
+        hits[budget] = round(intel[0] * count)
+        over = f"{intel[2]}/{count}" if intel[2] else "-"
+        print(
+            f"| {budget} | {intel[0]:.3f} | {intel[1]:.0f} | {over} | "
+            f"{by_name['lean'][0]:.3f} |"
+        )
+
+    largest = max(budgets)
+    best = hits[largest]
+    knee = knee_budget(hits, budgets)
+    print(f"\nmax hits: {best} of {count} at {largest} tokens")
+    if knee == largest:
+        print(f"knee: {knee} -- no smaller budget in the sweep held the same hit count")
+    else:
+        print(
+            f"knee: {knee} tokens hold {best} hits "
+            f"({int(knee / largest * 100)}% of {largest})"
+        )
+    return 0
+
+
+def cmd_bench(args) -> int:
+    corpus = Corpus(load(Path(args.path)))
+    files = corpus.files
+    if not files:
+        print("no source files", file=sys.stderr)
+        return 1
+    queries = queries_for(args, files)
+    if not queries:
+        print("no queries generated", file=sys.stderr)
+        return 1
+    phases = phases_of(getattr(args, "phases", None))
+
+    if getattr(args, "sweep", None):
+        return report_sweep(corpus, queries, args, phases)
+
+    rows = bench_rows(corpus, queries, args.budget, phases)
+
+    # Only policies that respect the budget can win: a dump that blows it is not
+    # comparable, and scoring it as if it fit is how a compression benchmark lies.
+    within = [row for row in rows if row[2] == 0] or rows
+    within.sort(key=lambda row: (-row[0], row[1], row[3]))
+    rows.sort(key=lambda row: (-row[0], row[1], row[3]))
 
     scope = " (code-only)" if getattr(args, "code_only", False) else ""
     print(f"corpus: {args.path}  files: {len(files)}  queries: {len(queries)}  "
@@ -1114,28 +1260,6 @@ def cmd_bench(args) -> int:
     print("a one-query difference sits inside that bracket and is not a result\n")
     print("| policy | recall | tokens | over | ms |")
     print("| --- | --- | --- | --- | --- |")
-    rows = []
-    for name, build in policies.items():
-        total_recall = 0.0
-        total_tokens = 0
-        over = 0
-        started = time.perf_counter()
-        for query in queries:
-            needles = query["needles"]
-            context, used = build(words_of(needles[0]), needles[0])
-            total_tokens += used
-            if used > args.budget:
-                over += 1
-            total_recall += recall_of(context, query["needles"])
-        elapsed = (time.perf_counter() - started) * 1000
-        count = len(queries)
-        rows.append((total_recall / count, total_tokens / count, over, elapsed / count, name))
-
-    # Only policies that respect the budget can win: a dump that blows it is not
-    # comparable, and scoring it as if it fit is how a compression benchmark lies.
-    within = [row for row in rows if row[2] == 0] or rows
-    within.sort(key=lambda row: (-row[0], row[1], row[3]))
-    rows.sort(key=lambda row: (-row[0], row[1], row[3]))
 
     misreported = 0
     for mean_recall, mean_tokens, over, mean_ms, name in rows:
@@ -1178,6 +1302,27 @@ def cmd_bench(args) -> int:
         )
         if ai[0] <= ln[0] and ai[1] >= ln[1]:
             print("lean wins on both -- intelligence-first is paying for nothing here")
+
+    if getattr(args, "ablate", False):
+        # Which phases earn their tokens? Remove each one and re-measure. A phase
+        # whose removal costs nothing is charging the budget for itself.
+        base = next(row for row in rows if row[4] == "intelligence")
+        active = phases if phases is not None else set(PHASES)
+        print("\nablation (intelligence, one phase removed)")
+        print("| removed | recall | tokens | d recall | d tokens |")
+        print("| --- | --- | --- | --- | --- |")
+        for phase in PHASES:
+            if phase not in active:
+                continue
+            sub = set(active) - {phase}
+            if not sub:
+                continue
+            sub_rows = bench_rows(corpus, queries, args.budget, sub)
+            intel = next(row for row in sub_rows if row[4] == "intelligence")
+            print(
+                f"| {phase} | {intel[0]:.3f} | {intel[1]:.0f} | "
+                f"{intel[0] - base[0]:+.3f} | {intel[1] - base[1]:+.0f} |"
+            )
 
     if getattr(args, "diagnose", False):
         # Where do the misses come from? A needle whose file was never ranked is a
@@ -1278,9 +1423,7 @@ def cmd_next(args) -> int:
     if not corpus.files:
         print("no source files", file=sys.stderr)
         return 1
-    queries = auto_queries(
-        corpus.files, args.queries, args.seed, args.rare, code_only=args.code_only
-    )
+    queries = queries_for(args, corpus.files)
     if not queries:
         print("no queries generated", file=sys.stderr)
         return 1
@@ -1398,6 +1541,29 @@ def cmd_selftest(_args) -> int:
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
+
+        # A sweep only changes the default when the smaller budget keeps the hits.
+        assert knee_budget({500: 10, 2000: 40, 4000: 40}, [500, 2000, 4000]) == 2000, \
+            "the knee is the smallest budget holding the best hit count"
+        assert knee_budget({2000: 39, 4000: 40}, [2000, 4000]) == 4000, \
+            "a smaller budget that loses a hit is not the knee"
+        assert knee_budget({4000: 40}, [4000]) == 4000, "a single budget is its own knee"
+        checks += 3
+
+        # Both query-file shapes, because a hand-written question set is the only
+        # way the bench measures question answering rather than symbol lookup.
+        harness = root / "q1.json"
+        harness.write_text(json.dumps([{"question": "where", "needles": ["refresh_token"]}]),
+                           encoding="utf-8")
+        tasks = root / "q2.json"
+        tasks.write_text(json.dumps({"tasks": [{"question": "where", "answer": "sessions.db"}]}),
+                         encoding="utf-8")
+        assert queries_from_file(harness)[0]["needles"] == ["refresh_token"], \
+            "the {question, needles} shape must load"
+        assert queries_from_file(tasks)[0]["needles"] == ["sessions.db"], \
+            "an {answer} task must become a needle"
+        checks += 2
+
         (root / "alpha.py").write_text(
             "def refresh_token(user):\n"
             "    value = user.token\n"
@@ -1609,9 +1775,20 @@ def main(argv: list[str] | None = None) -> int:
 
     p_bench = sub.add_parser("bench", help="recall, then tokens, then time")
     p_bench.add_argument("path")
-    p_bench.add_argument("--queries", type=int, default=25)
+    p_bench.add_argument(
+        "--queries", default="25",
+        help="a count to generate, or a JSON file of questions with known answers",
+    )
     p_bench.add_argument("--budget", type=int, default=4000)
     p_bench.add_argument("--seed", type=int, default=0)
+    p_bench.add_argument(
+        "--sweep", default=None,
+        help="comma-separated budgets; prints recall per budget and the knee",
+    )
+    p_bench.add_argument(
+        "--ablate", action="store_true",
+        help="remove each phase in turn and report what it cost in recall and tokens",
+    )
     p_bench.add_argument(
         "--rare", type=int, default=2,
         help="needles appear in at most this many files; 1 is the hard case",
@@ -1642,7 +1819,10 @@ def main(argv: list[str] | None = None) -> int:
         help="what the current version still misses, for the next version to fix",
     )
     p_next.add_argument("path")
-    p_next.add_argument("--queries", type=int, default=25)
+    p_next.add_argument(
+        "--queries", default="25",
+        help="a count to generate, or a JSON file of questions with known answers",
+    )
     p_next.add_argument("--budget", type=int, default=4000)
     p_next.add_argument("--seed", type=int, default=0)
     p_next.add_argument(

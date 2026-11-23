@@ -591,3 +591,33 @@ Two failures stay out of the README on purpose — the false bug report is alrea
 covered by "never trust a symbol you have not seen defined", and the check that
 never fired is now enforced by `brackets()` in code, so it does not also need
 prose.
+
+
+
+## 2.29.0 — the last blind measurements
+
+Three questions had no answer from the product before this version, and each is
+now a flag that CI runs:
+
+| Flag | The question it answers |
+| --- | --- |
+| `--sweep 1000,2000,3000,4000` | What is the smallest budget that holds recall? |
+| `--ablate` | Which phases cost tokens without buying recall? |
+| `--queries <file>` | Does it work on questions, or only on symbol lookups? |
+
+Plus one CI fix: `ctx next` now runs on the **default** (rare≤2) set. It had only
+ever run with `--rare 1`, so the mixed set's 6 misses were invisible while hard
+and code-only reported zero.
+
+The knee is defined as the smallest budget with the same **hit count** as the
+largest budget — not "within the interval", because a one-query difference is
+exactly what the interval says is not a result. `knee_budget()` is a pure
+function with three selftest cases, so the definition cannot drift.
+
+The measurement loop moved into `bench_rows(corpus, queries, budget, phases)`, so
+the single-budget table, the sweep and the ablation all run the same code. That
+is the same one-implementation argument that retires the research harness next.
+
+**Prediction recorded before measuring:** the knee is below 4,000 on the mixed
+set; at least one phase shows a delta inside the interval and should be dropped;
+the default-set misses are a different shape from the hard set's.
