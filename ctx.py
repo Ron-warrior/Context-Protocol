@@ -1539,23 +1539,23 @@ def cmd_selftest(_args) -> int:
     assert "refresh" in words and "the" not in words, f"stopwords leaked: {words}"
     checks += 1
 
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
+    # A sweep only changes the default when the smaller budget keeps the hits.
+    assert knee_budget({500: 10, 2000: 40, 4000: 40}, [500, 2000, 4000]) == 2000, \
+        "the knee is the smallest budget holding the best hit count"
+    assert knee_budget({2000: 39, 4000: 40}, [2000, 4000]) == 4000, \
+        "a smaller budget that loses a hit is not the knee"
+    assert knee_budget({4000: 40}, [4000]) == 4000, "a single budget is its own knee"
+    checks += 3
 
-        # A sweep only changes the default when the smaller budget keeps the hits.
-        assert knee_budget({500: 10, 2000: 40, 4000: 40}, [500, 2000, 4000]) == 2000, \
-            "the knee is the smallest budget holding the best hit count"
-        assert knee_budget({2000: 39, 4000: 40}, [2000, 4000]) == 4000, \
-            "a smaller budget that loses a hit is not the knee"
-        assert knee_budget({4000: 40}, [4000]) == 4000, "a single budget is its own knee"
-        checks += 3
-
-        # Both query-file shapes, because a hand-written question set is the only
-        # way the bench measures question answering rather than symbol lookup.
-        harness = root / "q1.json"
+    # Both query-file shapes, because a hand-written question set is the only way
+    # the bench measures question answering rather than symbol lookup. Written in
+    # their own directory: the corpus fixture below asserts an exact file count.
+    with tempfile.TemporaryDirectory() as qtmp:
+        qroot = Path(qtmp)
+        harness = qroot / "q1.json"
         harness.write_text(json.dumps([{"question": "where", "needles": ["refresh_token"]}]),
                            encoding="utf-8")
-        tasks = root / "q2.json"
+        tasks = qroot / "q2.json"
         tasks.write_text(json.dumps({"tasks": [{"question": "where", "answer": "sessions.db"}]}),
                          encoding="utf-8")
         assert queries_from_file(harness)[0]["needles"] == ["refresh_token"], \
@@ -1564,6 +1564,8 @@ def cmd_selftest(_args) -> int:
             "an {answer} task must become a needle"
         checks += 2
 
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
         (root / "alpha.py").write_text(
             "def refresh_token(user):\n"
             "    value = user.token\n"
