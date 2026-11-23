@@ -828,6 +828,22 @@ def recall_of(context: str, needles: list[str]) -> float:
     return sum(1 for needle in needles if needle.lower() in low) / len(needles)
 
 
+def complete_of(context: str, needles: list[str]) -> bool:
+    """True only when every required fact is present.
+
+    The metric that measures intelligence rather than coverage. A question needing
+    three facts that receives two scores 0.67 recall and is still unanswerable —
+    the answer is wrong, not two-thirds right. Recall says how much of the evidence
+    arrived; complete says whether the context can answer the question at all, and
+    the objective is about the second one. A model given a partial context will
+    either refuse or invent the missing part, and inventing is worse.
+    """
+    if not needles:
+        return False
+    low = context.lower()
+    return all(needle.lower() in low for needle in needles)
+
+
 def wilson(successes: float, total: int, z: float = 1.96) -> tuple[float, float]:
     """The 95% interval for a proportion, so a one-query change is not called a gain.
 
@@ -1093,6 +1109,8 @@ def queries_from_file(path: Path) -> list[dict]:
         if not isinstance(item, dict):
             continue
         needles = item.get("needles")
+        if not needles and item.get("answers"):
+            needles = [str(a) for a in item["answers"]]
         if not needles and item.get("answer"):
             needles = [str(item["answer"])]
         if not needles:
@@ -1163,22 +1181,40 @@ def bench_rows(
         "intelligence": intelligence,
     }
 
-    rows: list[tuple[float, int, int, float, str]] = []
+    rows: list[tuple[float, int, int, float, str, float]] = []
     for name, build in policies.items():
         total_recall = 0.0
+        complete = 0
         total_tokens = 0
         over = 0
         started = time.perf_counter()
         for query in queries:
             needles = query["needles"]
-            context, used = build(words_of(needles[0]), needles[0])
+            # Every fact the question needs is searched for, not just the first.
+            # A multi-fact task whose second fact is never queried is scored on
+            # retrieval that was never attempted, which would make the complete
+            # metric measure luck. A single-fact task keeps the lookup tier; a
+            # multi-fact one has no single phrase to match verbatim.
+            words: list[str] = []
+            for needle in needles:
+                for word in words_of(needle):
+                    if word not in words:
+                        words.append(word)
+            phrase = needles[0] if len(needles) == 1 else ""
+            context, used = build(words, phrase)
             total_tokens += used
             if used > budget:
                 over += 1
-            total_recall += recall_of(context, query["needles"])
+            recall = recall_of(context, query["needles"])
+            total_recall += recall
+            if recall >= 1.0:
+                complete += 1
         elapsed = (time.perf_counter() - started) * 1000
         count = len(queries)
-        rows.append((total_recall / count, total_tokens / count, over, elapsed / count, name))
+        rows.append((
+            total_recall / count, total_tokens / count, over, elapsed / count, name,
+            complete / count,
+        ))
     return rows
 
 
@@ -1220,30 +1256,33 @@ def report_sweep(
 
     count = len(queries)
     print(f"sweep: {args.path}  files: {len(corpus.files)}  queries: {count}")
-    print("a smaller budget wins only if it keeps the same hit count")
-    print("\n| budget | recall | tokens | over | lean recall |")
-    print("| --- | --- | --- | --- | --- |")
+    print("a smaller budget wins only if it keeps the same complete count")
+    print("\n| budget | recall | complete | tokens | over | lean complete |")
+    print("| --- | --- | --- | --- | --- | --- |")
 
     hits: dict[int, int] = {}
     for budget in budgets:
         by_name = {row[4]: row for row in bench_rows(corpus, queries, budget, phases)}
         intel = by_name["intelligence"]
-        hits[budget] = round(intel[0] * count)
+        # The knee is measured on complete tasks, not fractional recall: a context
+        # that carries two of three facts cannot answer the question, so "same hit
+        # count" has to mean the same number of fully answerable tasks.
+        hits[budget] = round(intel[5] * count)
         over = f"{intel[2]}/{count}" if intel[2] else "-"
         print(
-            f"| {budget} | {intel[0]:.3f} | {intel[1]:.0f} | {over} | "
-            f"{by_name['lean'][0]:.3f} |"
+            f"| {budget} | {intel[0]:.3f} | {intel[5]:.3f} | {intel[1]:.0f} | {over} | "
+            f"{by_name['lean'][5]:.3f} |"
         )
 
     largest = max(budgets)
     best = hits[largest]
     knee = knee_budget(hits, budgets)
-    print(f"\nmax hits: {best} of {count} at {largest} tokens")
+    print(f"\nmax complete: {best} of {count} at {largest} tokens")
     if knee == largest:
-        print(f"knee: {knee} -- no smaller budget in the sweep held the same hit count")
+        print(f"knee: {knee} -- no smaller budget in the sweep answered the same tasks")
     else:
         print(
-            f"knee: {knee} tokens hold {best} hits "
+            f"knee: {knee} tokens answer {best} tasks "
             f"({int(knee / largest * 100)}% of {largest})"
         )
     return 0
@@ -1279,11 +1318,11 @@ def cmd_bench(args) -> int:
     print("tokens is what the policy ACTUALLY emitted; over = it blew the budget")
     print("recall is a proportion of the queries, so its 95% interval follows it:")
     print("a one-query difference sits inside that bracket and is not a result\n")
-    print("| policy | recall | tokens | over | ms |")
-    print("| --- | --- | --- | --- | --- |")
+    print("| policy | recall | complete | tokens | over | ms |")
+    print("| --- | --- | --- | --- | --- | --- |")
 
     misreported = 0
-    for mean_recall, mean_tokens, over, mean_ms, name in rows:
+    for mean_recall, mean_tokens, over, mean_ms, name, complete in rows:
         flag = f"{over}/{len(queries)}" if over else "-"
         # `mean_recall` is a proportion; `wilson` wants a count of successes and
         # divides by the total itself. Passing the proportion made it divide by
@@ -1300,7 +1339,7 @@ def cmd_bench(args) -> int:
             misreported += 1
         print(
             f"| {name} | {mean_recall:.3f} ({low:.3f}-{high:.3f}) | "
-            f"{mean_tokens:.0f} | {flag} | {mean_ms:.1f} |"
+            f"{complete:.3f} | {mean_tokens:.0f} | {flag} | {mean_ms:.1f} |"
         )
 
     # A table whose statistics do not describe their own values is not a result.
@@ -1417,7 +1456,7 @@ def cmd_bench(args) -> int:
     # nothing happened; below it, the numbers are forced back into view.
     floor = getattr(args, "floor", None)
     if floor is not None:
-        recall_by_name = {name: recall for recall, _t, _o, _m, name in rows}
+        recall_by_name = {name: recall for recall, _t, _o, _m, name, _c in rows}
         got = recall_by_name.get("intelligence", 0.0)
         if got < floor:
             print(
@@ -1563,6 +1602,13 @@ def cmd_selftest(_args) -> int:
     words = words_of("where is the refresh token")
     assert "refresh" in words and "the" not in words, f"stopwords leaked: {words}"
     checks += 1
+
+    # A multi-fact question is answered only when every fact is present; a partial
+    # context is a wrong answer, not two-thirds of one.
+    assert complete_of("alpha beta", ["alpha", "beta"]), "all facts present is complete"
+    assert not complete_of("alpha", ["alpha", "beta"]), "a missing fact is not complete"
+    assert not complete_of("anything", []), "no facts is not complete"
+    checks += 3
 
     # A `.ctxrc` typo must not crash the command (#1, JONIMONI09).
     assert rc_budget({"budget": "lots"}) == 1000, "a non-integer budget falls back"
