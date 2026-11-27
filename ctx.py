@@ -44,6 +44,10 @@ TEXT_EXT = {
     ".mm", ".scala", ".sh", ".lua", ".ex", ".exs", ".erl", ".hs", ".ml",
     ".clj", ".sql", ".vue", ".svelte", ".dart", ".zig", ".md", ".rst", ".txt",
     ".toml", ".yaml", ".yml", ".json",
+    # 3.1.0 — the declarative half of a project. A JS rewrite's HTML entry
+    # point and CSS, an Android manifest, a Gradle build file. All are text
+    # and all hold facts a model needs; none were visible before.
+    ".html", ".htm", ".css", ".xml", ".gradle", ".kts",
 }
 
 PROSE_EXT = {".md", ".rst", ".txt"}
@@ -51,7 +55,7 @@ PROSE_EXT = {".md", ".rst", ".txt"}
 MAX_FILE_BYTES = 400_000
 MAX_OUTLINE_LINES = 60
 MAX_BODY_LINES = 80
-__version__ = "3.0.2"
+__version__ = "3.1.0"
 
 STOPWORDS = {
     "the", "and", "how", "does", "what", "where", "which", "that", "this",
@@ -1671,6 +1675,30 @@ def cmd_selftest(_args) -> int:
         assert load(bare) == [], "an empty directory is zero files, not an error"
         assert load(bare / "missing") == [], "a missing path is zero files, not an error"
         checks += 2
+
+        # 3.1.0 — the declarative half of a codebase was invisible. A query for
+        # the entry point of a JS rewrite could not see index.html; an Android
+        # query could not see AndroidManifest.xml or build.gradle. The four
+        # assertions below pin the inclusion and the exclusion of binary noise.
+        with tempfile.TemporaryDirectory() as decl_tmp:
+            declroot = Path(decl_tmp)
+            # Distinct text per file: take() drops duplicate chunks, so identical
+            # fixtures would only ever emit the first one and prove nothing about
+            # the others being rankable.
+            for name in ("index.html", "app.css", "AndroidManifest.xml", "build.gradle"):
+                (declroot / name).write_text(
+                    f"<marker>declarative fact in {name}</marker>\n", encoding="utf-8"
+                )
+            (declroot / "image.png").write_bytes(b"\x89PNG not source")
+            names = {source.path for source in load(declroot)}
+            assert {"index.html", "app.css", "AndroidManifest.xml", "build.gradle"} <= names, \
+                f"declarative files must be loadable: {sorted(names)}"
+            assert "image.png" not in names, "binary assets must stay invisible"
+            body, _used, _n = build_context(
+                Corpus(load(declroot)), ["declarative", "fact"], 1000
+            )
+            assert "index.html" in body, "the HTML entry point must be rankable"
+        checks += 3
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

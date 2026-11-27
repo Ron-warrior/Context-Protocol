@@ -134,6 +134,29 @@ jobs:
           if ! python3 ctx.py plan | grep -q "No files yet"; then
             echo "ctx plan must name the zero-file case"; exit 1
           fi
+      - name: The clean-room JS rewrite, before any source exists
+        run: |
+          set -euo pipefail
+          # A text-only coder cannot see a file the corpus refuses to load. The
+          # entry point of a JS rewrite is HTML, then CSS and XML in an Android
+          # port; none of them were in TEXT_EXT before 3.1.0.
+          room="$(mktemp -d)"
+          printf '<title>app entry point</title>\n<script src="game.js"></script>\n' > "$room/index.html"
+          printf 'body { margin: 0 }\n' > "$room/app.css"
+          printf '<manifest package="com.example.game"/>\n' > "$room/AndroidManifest.xml"
+          printf 'plugins { id "java" }\n' > "$room/build.gradle"
+          printf '\211PNG not source\n' > "$room/image.png"
+          python3 ctx.py map "$room" | tee decl-map.txt
+          for name in index.html app.css AndroidManifest.xml build.gradle; do
+            grep -q "$name" decl-map.txt || { echo "missing from the map: $name"; exit 1; }
+          done
+          if grep -q "image.png" decl-map.txt; then
+            echo "a binary asset must not be ranked as source"; exit 1
+          fi
+          python3 ctx.py query "$room" "app entry point start" | tee decl-query.txt
+          grep -q "index.html" decl-query.txt || {
+            echo "the HTML entry point must reach the context"; exit 1
+          }
       - name: Bench this repository (intelligence vs lean)
         run: |
           set -uo pipefail

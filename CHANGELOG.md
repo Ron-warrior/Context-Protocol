@@ -24,6 +24,9 @@ tool. What that means concretely:
   facts is scored as the unanswerable context it is rather than as an average.
 - **3.0.2 — the empty repository** says which failure it is: a missing path, or a
   project with no code yet, where the useful rungs are 0, 5, 6 and 7.
+- **3.1.0 — the declarative half.** HTML, CSS, XML and Gradle files are now part
+  of the corpus. A clean-room JS rewrite's entry point, an Android manifest and
+  a Gradle build rule were previously invisible to every command.
 
 ## 2.x — measurement
 

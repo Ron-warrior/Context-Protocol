@@ -92,7 +92,8 @@ Cost is measured on the text actually emitted, labels and header included, so th
 `~N tokens` figure is the size of what you received. `--phases body,call` runs a
 subset of the phases, which is how a change is attributed to one of them. It never
 reads a file it has no reason to read, and `.gitignore` plus `.ctxrc` (`budget=`,
-`expand=off`) are honoured.
+`expand=off`) are honoured. HTML, CSS, XML and Gradle files are in the corpus:
+the entry point and build rules often live there, not in the source files.
 
 ## Mode 3 — measure before you trust
 

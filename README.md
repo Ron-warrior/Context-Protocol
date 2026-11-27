@@ -4,7 +4,7 @@ How an agent should spend tokens inside a codebase: rank the files for the
 question, read the block that answers it, and measure whether the answer arrived.
 Evidence in FINDINGS.md, the trace in TRACE.md, the numbers in SCOREBOARD.md.
 
-Version: 3.0.2 — intelligence first, then tokens, then speed
+Version: 3.1.0 — intelligence first, then tokens, then speed
 
 ---
 
@@ -66,6 +66,7 @@ the frame, the acceptance check and a `.ctxrc` first — `ctx plan` needs no fil
 - **Never whole-file when a window will do** — widen only after a narrow read missed.
 - **Never trust a symbol you have not seen defined** — find it, do not assume.
 - **Never change a signature without grepping its callers.** All of them.
+- **Rank declarative files.** HTML, CSS, XML and Gradle hold entry points and build rules; code alone misses them.
 - **State what you did not verify.** "Could not run it" is a required sentence.
 - **Every number carries its command.** Quote the command and its output, or say you have not measured it. Recount from the printed list, never from memory.
 - **No generated output** — edit the source that produces it.
@@ -89,11 +90,11 @@ the frame, the acceptance check and a `.ctxrc` first — `ctx plan` needs no fil
 | --- | --- | --- |
 | `SKILL.md` | Agent entry point: three modes, one needing no install | Pasting this URL |
 | `ctx.py` | The CLI: map, query, ask, path, bench, next, plan, selftest | Running it |
-| `FINDINGS.md` | Why these rules, ranked against the alternatives | Adding a tool |
+| `FINDINGS.md` | Why these rules, ranked against alternatives | Adding a tool |
 | `TRACE.md` | What each version measured and got wrong | Bumping a version |
 | `SCOREBOARD.md` | Measured results per version, and the promotion rule | Changing this file |
 | `PROTOCOL.md` | Long form: playbooks, budgets, memory schema | Unfamiliar task |
 | `CHANGELOG.md` | The map: three eras, one paragraph each | Orientating |
-| `eval/tasks.json` | Ten questions over a fixture corpus, with answers | Measuring questions |
+| `eval/tasks.json` | Questions with known answers | Measuring questions |
 | `eval/score.py` | Scores the ranges a model actually read | Checking a model |
 | `eval/compare_graphify.py` | graphify's output on the same metric | Comparing against it |

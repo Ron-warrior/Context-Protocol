@@ -1376,3 +1376,42 @@ same unhelpful line, and neither of them raises.
 on a missing path both return zero files rather than raising — and the CI step
 *The repository that has not started*, which runs both cases and fails if either
 message regresses or the exit code stops being 1.
+
+
+
+## Trace: 3.1.0 — applied to myself, for the work this is used for
+
+**Frame, written before searching.** The next version should improve delivery
+throughput on a clean-room JavaScript rewrite driven by a text-only coder: find
+the entry point and build rules, not only functions. The acceptance check: an
+HTML, CSS, XML or Gradle file must be loadable, rankable and emitted, binary
+assets must stay invisible, and every published number must still be measured.
+
+**What the self-application did first.** It proposed a "definition outranked by
+a two-word mention" defect in `best_hit_lines` and drafted a version bump for it.
+Checking the arithmetic before writing the regression test killed it: a
+declaration scores 1+2=3 and a two-word mention scores 2, so the inversion did
+not exist. Both edits were reverted before any commit. This is the protocol's
+own Mode 4 failure table, caught while applying the protocol to itself — the
+failed check is recorded here rather than hidden.
+
+**The real gap.** `TEXT_EXT` covered source and prose but not the declarative
+files that define a project's entry points: `.html`, `.css`, `.xml`, `.gradle`,
+`.kts`. A query for "where does the app start" on a JS rewrite could not see
+`index.html`; an Android query could not see the manifest or Gradle file. The
+use case this version is built for is exactly one where those files matter.
+
+**What changed.** Six extensions added; three selftest assertions confirm the
+files load, a query emits `index.html`, and `image.png` stays out. A CI step in
+the `ctx` job creates a small clean-room-shaped corpus and checks all three
+through the CLI, so the claim is exercised by the product, not only by a unit
+test. `README.md`, `SKILL.md`, `PROTOCOL.md` and `CHANGELOG.md` carry the rule.
+
+**Not measured yet.** Whether this changes answer completeness on the published
+corpora. The freellmapi corpus is TypeScript and the ladder fixture is Python, so
+neither contains the new extensions; adding them cannot change those numbers by
+construction. A JS project with declarative files has not been benchmarked. The
+claim here is narrow: those files are now visible, and the CLI proves it in CI.
+
+**Round-trip.** This trace is written after the edits, and the diff is read back
+before the version is closed. No number in this entry is from an unrun command.

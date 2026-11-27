@@ -15,6 +15,7 @@ and the anti-patterns.
 | Cross-repo | Map each repo separately; never hold two trees in context at once; pass findings as a short written note, not as recalled detail | 2k per repo | The interface between them is described in ≤5 lines |
 | Library / API question | Docs first (or a docs MCP), source only to resolve a contradiction | 1–2k | The call signature and the one gotcha are known |
 | "Where is this string/number from" | grep the literal; if it appears once, that is the answer; if 40 times, grep a narrower sibling token | 1k | One authoritative definition, not many usages |
+| New project, no code yet | Write the frame and the acceptance check first; add `.ctxrc` with the budget; `ctx plan` works with zero files | ~100 | Rung 0 is written down and rung 6 can be run |
 
 ## Budget arithmetic
 
@@ -27,6 +28,10 @@ and the anti-patterns.
   questions if the ranking is honest.
 - Outlines are the cheapest useful unit: one line per declaration, ~10–15 tokens,
   and they tell you which file is worth a window.
+- The corpus includes declarative files — `.html`, `.css`, `.xml`, `.gradle`,
+  `.kts` — beside source. In a JS rewrite the entry point is HTML; in an Android
+  project the manifest and build rules are XML and Gradle. Code-only retrieval
+  misses the first files a person would open.
 
 - **Outline only when you have no ranking.** Rungs 3 then 4 are the order for a
   human who does not yet know what to read. Once a ranking exists, the body of the

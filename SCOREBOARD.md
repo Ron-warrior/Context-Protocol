@@ -760,3 +760,17 @@ strictest set that set it.
 "complete" would have measured luck. It now searches every fact, and applies the
 lookup tier only to single-fact questions, where there is a phrase to match
 verbatim.
+
+
+
+## 3.1.0 — declarative files, measured only where measured
+
+| claim | evidence | result |
+| --- | --- | --- |
+| HTML/CSS/XML/Gradle load and rank | new CI step *The clean-room JS rewrite, before any source exists* | pending this push |
+| binary assets stay invisible | same step, `image.png` must not appear in the map | pending this push |
+| published numbers unchanged | freellmapi is TypeScript and the ladder fixture Python; neither has the new extensions | true by construction, not re-run here |
+| `best_hit_lines` definition inversion | arithmetic checked, 1+2=3 for a declaration vs 2 for a two-word mention | rejected before any commit |
+
+**Every number above carries its command once the job reports.** A pending cell
+is not a pass; it is an honest place to fill in the CI receipt after the push.
